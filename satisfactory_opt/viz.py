@@ -1,19 +1,28 @@
 """Visualization exporter.
 
 Turns a solved `Solution` (plus optional node coordinates) into a single,
-self-contained `index.html` that renders two linked views:
+self-contained `index.html` that renders a production-flow graph plus a
+geographic map that splits into three layers:
 
   1. PRODUCTION FLOW  -- a layered graph of the factory: raw resources on the
      left flow rightward through recipe/building nodes to the shipped targets
      on the right. Edges are belt/pipe flows sized by items-per-minute, so you
      can read at a glance which recipe a part comes from and how much.
 
-  2. RESOURCE MAP     -- the real Satisfactory map with every resource node
-     plotted at its true coordinates, the chosen mining sites and the central
-     hub overlaid, and belts drawn hub<->site weighted by throughput.
+  2. RESOURCE MAP     -- the real Satisfactory map with three switchable layers
+     that decouple production from logistics:
+       * Factories  -- production sites; click to trace input *sourcing*.
+       * Mining     -- on-site raw extraction per region.
+       * Transport  -- the logistics network: production regions grid-clustered
+         into logistics hubs (tunable live via a density slider), with the
+         surviving inter-hub trains aggregated into lines sized by items/min.
 
-The two views are linked: hovering/selecting a raw resource in the flow graph
-highlights the mining sites that feed it on the map, and vice-versa.
+The views are linked: from a raw resource's inspector, "show source nodes on
+map" jumps to the Mining layer and highlights the sites feeding it.
+
+The logistics clustering is purely a *view* over the solved spatial plan -- it
+re-groups regions and re-aggregates the existing shipments; it does not change
+the optimization. All three layers read the same `data["spatial"]` payload.
 
 `write_visualization()` writes `index.html` (data embedded inline so it opens
 straight off the filesystem with a double-click), a copy of `map_bg.jpg`, and

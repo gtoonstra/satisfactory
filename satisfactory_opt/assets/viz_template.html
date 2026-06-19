@@ -408,49 +408,91 @@ if(DATA.map){
     });
   }
   function buildFactoryLegend(){
-    const sav = SP.single_hub_cost>0? Math.round(100*(1-SP.transport_cost/SP.single_hub_cost)) : null;
+    const facs=SP.regions.filter(r=>r.machines>=0.5).length;
     leg.innerHTML =
-      `<div class="hd">Build regions (hubs)</div>`+
-      `<div class="lg"><span>${SP.regions.length} hubs · ${Math.ceil(SP.totMach)} machines</span></div>`+
-      (sav!=null? `<div class="lg"><span>transport −${sav}% vs single hub</span></div>`:'')+
+      `<div class="hd">Factories · production</div>`+
+      `<div class="lg"><span>${facs} factories · ${Math.ceil(SP.totMach)} machines</span></div>`+
       `<div class="hd" style="margin-top:9px">read</div>`+
       `<div class="lg"><span class="dot" style="background:#5a8f6b"></span><span>● factory (size = machines)</span></div>`+
-      `<div class="lg"><span class="dot" style="background:var(--raw);border-radius:2px"></span><span>◆ mining outpost (size = ore/min)</span></div>`+
-      `<div class="lg"><span class="dot" style="background:#9aa4b2"></span><span>line = items shipped</span></div>`+
-      `<div class="hd" style="margin-top:9px">click a hub: trace supply chain</div>`+
-      `<div class="lg"><span class="dot" style="background:var(--good)"></span><span>upstream (sources it)</span></div>`+
-      `<div class="lg"><span class="dot" style="background:var(--warn)"></span><span>downstream (uses it)</span></div>`;
+      `<div class="lg"><span class="dot" style="background:var(--raw);border-radius:2px"></span><span>◆ local mine (faint context)</span></div>`+
+      `<div class="hd" style="margin-top:9px">click a factory: trace sourcing</div>`+
+      `<div class="lg"><span class="dot" style="background:var(--good)"></span><span>where its inputs come from</span></div>`+
+      `<div class="lg"><span class="dot" style="background:var(--warn)"></span><span>where its outputs go</span></div>`;
   }
-  function buildLegend(){ (mapMode==='factory'&&SP)? buildFactoryLegend() : buildMiningLegend(); }
+  function buildTransportLegend(){
+    const sav = SP.single_hub_cost>0? Math.round(100*(1-SP.transport_cost/SP.single_hub_cost)) : null;
+    const n = LOGI? LOGI.hubs.length : 0, ln = LOGI? LOGI.links.length : 0;
+    leg.innerHTML =
+      `<div class="hd">Transport · logistics</div>`+
+      `<div class="lg"><span>${n} logistics hubs · ${ln} train lines</span></div>`+
+      (sav!=null? `<div class="lg"><span>transport −${sav}% vs single hub</span></div>`:'')+
+      `<div class="hd" style="margin-top:9px">read</div>`+
+      `<div class="lg"><span class="dot" style="background:#6ea8d8"></span><span>● hub (size = cargo/min)</span></div>`+
+      `<div class="lg"><span class="dot" style="background:var(--warn)"></span><span>◎ relay hub (mostly transit)</span></div>`+
+      `<div class="lg"><span class="dot" style="background:#9aa4b2"></span><span>line = train (width = items/min)</span></div>`+
+      `<div class="lg"><span class="dot" style="background:var(--fluid)"></span><span>fluid pipeline</span></div>`+
+      `<div class="hd" style="margin-top:9px">slider sets hub density · click to isolate</div>`;
+  }
+  function buildLegend(){
+    if(!SP || mapMode==='mining') return buildMiningLegend();
+    if(mapMode==='transport') return buildTransportLegend();
+    return buildFactoryLegend();
+  }
 
   function pt(o){ return {x:sx(wx(o.x)), y:sy(wy(o.y))}; }
   const maxSite=Math.max(1,...M.sites.map(s=>s.rate));
 
-  // ---- spatial (Factories) overlay --------------------------------------- //
+  // ---- spatial overlay (drives the Factories & Transport layers) --------- //
+  // Three map LAYERS share this data:
+  //   factory   -> production sites (fine regions), per-input sourcing
+  //   mining    -> on-site raw extraction (fine regions)
+  //   transport -> logistics network: fine regions GRID-CLUSTERED into a tunable
+  //                number of logistics hubs, with trains aggregated between them.
   const SP=DATA.spatial;
   let mapMode = SP? 'factory' : 'mining';
-  let selReg = null;                       // selected region id (factory mode)
+  let selReg  = null;                      // selected production region (factory mode)
+  let selLogi = null;                      // selected logistics hub (transport mode)
+  let logiCell = 120000;                   // logistics grid cell (game units); see below
+  let LOGI = null;                         // built lazily by buildLogistics()
   const regById={};
   if(SP){ SP.regions.forEach(rg=>regById[rg.id]=rg);
     SP.maxMach=Math.max(1,...SP.regions.map(rg=>rg.machines));
     SP.totMach=SP.regions.reduce((s,rg)=>s+rg.machines,0);
-    // aggregate per-item shipments into ONE directed link per hub pair (a->b)
+    // aggregate per-item shipments into ONE directed link per region pair (a->b)
     const lk={};
     SP.shipments.forEach(s=>{ const k=s.src+'>'+s.dst;
       const l=lk[k]||(lk[k]={a:s.src,b:s.dst,rate:0,items:[],allFluid:true});
       l.rate+=s.rate; l.items.push({item:s.item_name,rate:s.rate,fluid:s.fluid});
       if(!s.fluid) l.allFluid=false; });
     SP.links=Object.values(lk);
-    SP.links.forEach(l=>l.items.sort((a,b)=>a.item.localeCompare(b.item)));
+    SP.links.forEach(l=>l.items.sort((a,b)=>b.rate-a.rate));   // heaviest cargo first
     SP.maxLink=Math.max(1,...SP.links.map(l=>l.rate));
-    // per-region total mined (for the Mining view)
+    // per-region total mined (for the Mining layer)
     SP.maxMined=Math.max(1,...SP.regions.map(rg=>
       Object.values(rg.mined||{}).reduce((s,v)=>s+v,0)));
-    // per-(hub,item) shipment indices + link lookup, for commodity flow tracing
+    // accurate per-region cargo handled = Σ rate of every train touching it
+    // (net imports+exports MISS pass-through; incident-link sum counts it once
+    // per leg, which is what a station actually moves). Used to size hubs.
+    SP.regions.forEach(rg=>{ rg._tput=0;
+      rg._transitVol=Object.values(rg.transit||{}).reduce((s,v)=>s+v,0); });
+    SP.links.forEach(l=>{ if(regById[l.a]) regById[l.a]._tput+=l.rate;
+                          if(regById[l.b]) regById[l.b]._tput+=l.rate; });
+    // per-(region,item) shipment indices + link lookup, for commodity tracing
     SP.byDstItem={}; SP.bySrcItem={}; SP.linkIdx={};
     SP.links.forEach((l,i)=> SP.linkIdx[l.a+'>'+l.b]=i);
     SP.shipments.forEach(s=>{ (SP.byDstItem[s.dst+'|'+s.item_name]=SP.byDstItem[s.dst+'|'+s.item_name]||[]).push(s);
                               (SP.bySrcItem[s.src+'|'+s.item_name]=SP.bySrcItem[s.src+'|'+s.item_name]||[]).push(s); });
+    // Data-driven default density: pick a grid cell that yields ~12 logistics
+    // hubs over the area the regions actually span. This is the "reasonable
+    // number" — coarse enough to collapse stations into train depots, fine
+    // enough that distinct basins stay separate. The slider tunes it live.
+    if(SP.regions.length){
+      const xs=SP.regions.map(r=>r.x), ys=SP.regions.map(r=>r.y);
+      const w=Math.max(...xs)-Math.min(...xs), h=Math.max(...ys)-Math.min(...ys);
+      const area=Math.max(1, w*h);
+      logiCell=Math.min(360000, Math.max(60000,
+        Math.round(Math.sqrt(area/12)/10000)*10000));
+    }
   }
   const makes=(rg,it)=> rg && ((rg.produces&&it in rg.produces) || (rg.mined&&it in rg.mined));
   // Commodity trace, ONE level: for the selected hub, follow each input item back
@@ -512,86 +554,187 @@ if(DATA.map){
     lo.pop(); up.pop(); return lo.concat(up);
   }
 
+  // --- Factories layer: sourcing ----------------------------------------- //
+  // Which hubs actually PRODUCE/MINE an item that `region` imports — follow the
+  // shipment back through any pure-transit hops until a real producer is hit.
+  function producersOf(region,item){
+    const out=new Set(), seen=new Set(); let q=[region];
+    while(q.length){ const h=q.shift(); if(seen.has(h))continue; seen.add(h);
+      (SP.byDstItem[h+'|'+item]||[]).forEach(s=>{
+        if(makes(regById[s.src],item)) out.add(s.src);   // real source: stop
+        else q.push(s.src);                              // transit: keep walking back
+      }); }
+    return out;
+  }
+
+  // --- Transport layer: logistics clustering ----------------------------- //
+  // Grid-bin the fine production regions into logistics hubs of cell size
+  // `logiCell`, drop intra-hub shipments (those become local belts), and
+  // aggregate the surviving trains between hubs. This is the decoupling: the
+  // logistics network is coarser than the production network and tunable.
+  function buildLogistics(){
+    const cell=logiCell, byKey={}, regToHub={};
+    SP.regions.forEach(rg=>{
+      const k=Math.floor(rg.x/cell)+'_'+Math.floor(rg.y/cell);
+      (byKey[k]=byKey[k]||[]).push(rg);
+    });
+    const hubs=[];
+    Object.values(byKey).forEach((members,i)=>{
+      let wx=0,wy=0,wt=0,mach=0,mined=0;
+      members.forEach(rg=>{ const w=(rg._tput||0)+1;
+        wx+=rg.x*w; wy+=rg.y*w; wt+=w; mach+=rg.machines||0;
+        mined+=Object.values(rg.mined||{}).reduce((s,v)=>s+v,0); });
+      members.forEach(rg=>regToHub[rg.id]=i);
+      // dominant member label = biggest factory, else biggest mine
+      const lead=members.slice().sort((a,b)=>(b.machines||0)-(a.machines||0))[0];
+      hubs.push({id:i, x:wx/wt, y:wy/wt, members:members.map(r=>r.id),
+        memberRegs:members, machines:mach, minedTot:mined, label:lead?lead.label_name:'',
+        tput:0, transitVol:0, _in:{}, _out:{}});
+    });
+    // aggregate shipments between distinct hubs (intra-hub = local belt -> drop)
+    const lk={};
+    SP.shipments.forEach(s=>{ const a=regToHub[s.src], b=regToHub[s.dst];
+      if(a==null||b==null||a===b) return;
+      const key=a+'>'+b, l=lk[key]||(lk[key]={a,b,rate:0,items:{},allFluid:true});
+      l.rate+=s.rate; l.items[s.item_name]=(l.items[s.item_name]||0)+s.rate;
+      if(!s.fluid) l.allFluid=false;
+      hubs[b]._in[s.item_name]=(hubs[b]._in[s.item_name]||0)+s.rate;
+      hubs[a]._out[s.item_name]=(hubs[a]._out[s.item_name]||0)+s.rate;
+    });
+    const links=Object.values(lk).map(l=>({a:l.a,b:l.b,rate:l.rate,allFluid:l.allFluid,
+      items:Object.entries(l.items).map(([item,rate])=>({item,rate})).sort((x,y)=>y.rate-x.rate)}));
+    links.forEach(l=>{ hubs[l.a].tput+=l.rate; hubs[l.b].tput+=l.rate; });
+    // transit volume per hub = items that both arrive AND leave (relay/pass-through)
+    hubs.forEach(h=>{ let t=0; for(const it in h._in)
+      t+=Math.min(h._in[it], h._out[it]||0); h.transitVol=t; });
+    LOGI={ hubs, links, regToHub, cell,
+           maxTput:Math.max(1,...hubs.map(h=>h.tput)),
+           maxLink:Math.max(1,...links.map(l=>l.rate)) };
+  }
+  const logiRad=h=> 4+Math.sqrt((h.tput||0)/(LOGI?LOGI.maxTput:1))*26;
+  const isRelay=h=> h.tput>0 && (2*h.transitVol/h.tput) > 0.35;
+
+  // --- shared cargo-label renderer (region links OR logistics links) ------ //
+  // rel: optional Set of item names to keep (filters big labels to only the
+  // resources relevant to the selected entity). traced: optional Set of link
+  // indices to restrict to. posOf(endpoint)->{x,y}.
+  function drawCargoLabels(links, posOf, selId, rel, traced){
+    ctx.font='16px ui-sans-serif'; ctx.textAlign='left'; const LH=20;
+    links.forEach((l,idx)=>{
+      let show;
+      if(selId!=null){
+        if(traced && !traced.has(idx)) return;
+        const incident = l.a===selId || l.b===selId;
+        show = incident || view.s>1.5;
+      } else show = view.s>2.2;
+      if(!show) return;
+      let items=l.items; if(rel) items=items.filter(i=>rel.has(i.item));
+      if(!items.length) return;
+      const pa=posOf(l.a), pb=posOf(l.b);
+      const ux=pb.x-pa.x, uy=pb.y-pa.y, L=Math.hypot(ux,uy)||1;
+      const cx=pa.x+ux*0.4, cy=pa.y+uy*0.4;       // anchor 0.4 from src (pair lands 0.4/0.6)
+      const nx=-uy/L, ny=ux/L;                     // push to one side of the line
+      const lines=items.slice(0,8).map(i=>clip(i.item,18)+'  '+fmt(i.rate));
+      if(items.length>8) lines.push('+'+(items.length-8)+' more');
+      const w=Math.max(...lines.map(t=>ctx.measureText(t).width));
+      const bh=lines.length*LH+4;
+      const lx=cx+nx*(bh/2+4), ly=cy+ny*(bh/2+4);
+      const x0=lx-w/2-4, y0=ly-bh/2;
+      ctx.globalAlpha=.85; ctx.fillStyle='#0b0e13'; ctx.fillRect(x0,y0,w+8,bh);
+      ctx.fillStyle=l.allFluid?css('--fluid'):'#cfd6df'; ctx.globalAlpha=1;
+      lines.forEach((t,i)=>ctx.fillText(t, x0+4, y0+16+i*LH));
+    });
+    ctx.globalAlpha=1;
+  }
+
+  // ===================== LAYER: Factories (production) ==================== //
   function drawFactory(){
     // faint resource nodes for context
     ctx.globalAlpha=.16;
     M.nodes.forEach(n=>{ const p=pt(n); ctx.fillStyle=RES_COLOR[n.res]||'#888';
       ctx.beginPath(); ctx.arc(p.x,p.y,1.7,0,7); ctx.fill(); });
     ctx.globalAlpha=1;
-    // region territory: translucent hull over the SELECTED hub's mining sites
-    if(selReg!=null) SP.regions.forEach(rg=>{ const fp=rg.footprint; if(!fp||fp.length<3) return;
-      const sel=rg.id===selReg;
-      if(!sel) return;
-      const h=rg._hull||(rg._hull=convexHull(fp));
-      ctx.beginPath();
-      h.forEach((q,i)=>{ const p=pt({x:q[0],y:q[1]}); i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); });
-      ctx.closePath();
-      ctx.fillStyle=regColor(rg); ctx.globalAlpha=sel?.22:.08; ctx.fill();
-      ctx.strokeStyle=regColor(rg); ctx.globalAlpha=sel?.7:.22; ctx.lineWidth=1; ctx.stroke();
-    });
-    ctx.globalAlpha=1;
-    // directed flow arrows. selected hub: trace the whole supply chain —
-    // green = upstream (feeds it, back to the mines), orange = downstream.
+    // only the selected factory's items matter — filters big labels down
+    let rel=null;
+    if(selReg!=null){ const rg=regById[selReg];
+      rel=new Set([...Object.keys(rg.imported||{}),...Object.keys(rg.exported||{})]); }
+    // selected factory territory hull
+    if(selReg!=null){ const rg=regById[selReg], fp=rg&&rg.footprint;
+      if(fp&&fp.length>=3){ const h=rg._hull||(rg._hull=convexHull(fp));
+        ctx.beginPath(); h.forEach((q,i)=>{ const p=pt({x:q[0],y:q[1]}); i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); });
+        ctx.closePath(); ctx.fillStyle=regColor(rg); ctx.globalAlpha=.2; ctx.fill();
+        ctx.strokeStyle=regColor(rg); ctx.globalAlpha=.7; ctx.lineWidth=1; ctx.stroke(); ctx.globalAlpha=1; } }
+    // sourcing arrows: green = where its inputs come from, orange = where outputs go
     SP.links.forEach((l,idx)=>{ const ra=regById[l.a], rb=regById[l.b]; if(!ra||!rb) return;
       let col, alpha;
-      if(selReg!=null){
-        const up=traceUp.has(idx), down=traceDown.has(idx);
+      if(selReg!=null){ const up=traceUp.has(idx), down=traceDown.has(idx);
         if(!up && !down) return;
         col = up?css('--good'):css('--warn');
-        alpha = (l.a===selReg||l.b===selReg)? .95 : .55;
-      } else { col = l.allFluid?css('--fluid'):'#9aa4b2'; alpha=.3; }
+        alpha = (l.a===selReg||l.b===selReg)? .95 : .5;
+      } else { col='#475063'; alpha=.1; }            // faint context when nothing selected
       ctx.strokeStyle=col; ctx.globalAlpha=alpha;
       ctx.lineWidth = 1+Math.sqrt(l.rate/SP.maxLink)*6;
       arrow(pt(ra),pt(rb), regRad(rb)+2); });
     ctx.globalAlpha=1;
-    // markers: factories = circles, mining outposts = ore-coloured diamonds
+    // markers: factories = circles; local mines = faint diamonds (own layer for detail)
     SP.regions.forEach(rg=>{ const p=pt(rg), rad=regRad(rg), sel=rg.id===selReg;
-      const inTrace = selReg==null || traceNodes.has(rg.id);
-      ctx.globalAlpha = inTrace? 1 : .18;
+      const inTrace = selReg==null || traceNodes.has(rg.id), mine=isMine(rg);
+      ctx.globalAlpha = mine? (inTrace?.5:.12) : (inTrace?1:.18);
       ctx.fillStyle=regColor(rg);
       ctx.lineWidth=sel?3:1.5; ctx.strokeStyle=sel?'#fff':'#0e1116';
-      if(isMine(rg)){ ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(Math.PI/4);
-        ctx.fillRect(-rad,-rad,2*rad,2*rad); ctx.strokeRect(-rad,-rad,2*rad,2*rad); ctx.restore(); }
+      if(mine){ ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(Math.PI/4);
+        ctx.fillRect(-rad,-rad,2*rad,2*rad); ctx.restore(); }
       else { ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill(); ctx.stroke(); }
-      // name-label only traced hubs (when a hub is selected) to cut clutter
-      if(inTrace && (rad>11||sel)){ ctx.globalAlpha=1; ctx.textAlign='center';
-        ctx.fillStyle='#fff'; ctx.font='600 11px ui-sans-serif';
-        ctx.fillText(clip(rg.label_name,16), p.x, p.y-rad-5);
-        ctx.fillStyle=css('--mut'); ctx.font='10px ui-sans-serif';
-        ctx.fillText(Math.ceil(rg.machines)+' mach', p.x, p.y+rad+12); } });
+      if(!mine && inTrace && (rad>11||sel)){ ctx.globalAlpha=1; ctx.textAlign='center';
+        ctx.fillStyle='#fff'; ctx.font='600 16px ui-sans-serif';
+        ctx.fillText(clip(rg.label_name,16), p.x, p.y-rad-7);
+        ctx.fillStyle=css('--mut'); ctx.font='14px ui-sans-serif';
+        ctx.fillText(Math.ceil(rg.machines)+' mach', p.x, p.y+rad+17); } });
     ctx.globalAlpha=1;
-    // cargo labels. Selected hub: always label its direct trains; reveal the
-    // deeper supply-chain labels as you zoom in. Unselected: only when zoomed close.
-    {
-      ctx.font='10px ui-sans-serif'; ctx.textAlign='left';
-      const LH=12;
-      SP.links.forEach((l,idx)=>{
-        let show;
-        if(selReg!=null){
-          if(!traceUp.has(idx) && !traceDown.has(idx)) return;
-          const incident = l.a===selReg || l.b===selReg;
-          show = incident || view.s > 1.5;
-        } else show = view.s > 2.2;
-        if(!show) return;
-        const pa=pt(regById[l.a]), pb=pt(regById[l.b]);
-        // anchor the label partway from the SOURCE (where cargo loads) and push it
-        // to one side, so the opposite-direction link (B→A) doesn't overlap it.
-        const ux=pb.x-pa.x, uy=pb.y-pa.y, L=Math.hypot(ux,uy)||1;
-        const cx=pa.x+ux*0.4, cy=pa.y+uy*0.4;     // 0.4 from src; pair lands at 0.4 & 0.6
-        const nx=-uy/L, ny=ux/L;                   // edge normal (reverses for B→A)
-        // full label: every item on this train, one per line
-        const lines=l.items.map(i=>clip(i.item,18)+'  '+fmt(i.rate));
-        const w=Math.max(...lines.map(t=>ctx.measureText(t).width));
-        const bh=lines.length*LH+4;
-        const lx=cx+nx*(bh/2+4), ly=cy+ny*(bh/2+4); // offset to one side of the line
-        const x0=lx-w/2-4, y0=ly-bh/2;
-        ctx.globalAlpha=.85; ctx.fillStyle='#0b0e13';
-        ctx.fillRect(x0, y0, w+8, bh);
-        ctx.fillStyle=l.allFluid?css('--fluid'):'#cfd6df'; ctx.globalAlpha=1;
-        lines.forEach((t,i)=> ctx.fillText(t, x0+4, y0+11+i*LH));
-      });
-    }
+    // cargo labels: only the selected factory's relevant items, on traced trains
+    if(selReg!=null)
+      drawCargoLabels(SP.links, i=>pt(regById[i]), selReg, rel,
+                      new Set([...traceUp,...traceDown]));
+  }
+
+  // ===================== LAYER: Transport (logistics) ===================== //
+  function drawTransport(){
+    if(!LOGI) buildLogistics();
+    // faint production regions for context (the network sits ABOVE production)
+    ctx.globalAlpha=.14;
+    SP.regions.forEach(rg=>{ const p=pt(rg); ctx.fillStyle=isMine(rg)?css('--raw'):'#5a8f6b';
+      ctx.beginPath(); ctx.arc(p.x,p.y,2,0,7); ctx.fill(); });
     ctx.globalAlpha=1;
+    let rel=null;
+    if(selLogi!=null){ const h=LOGI.hubs[selLogi];
+      rel=new Set([...Object.keys(h._in||{}),...Object.keys(h._out||{})]); }
+    // all train lines; isolate the selected hub's trains
+    LOGI.links.forEach(l=>{ const ha=LOGI.hubs[l.a], hb=LOGI.hubs[l.b];
+      const incident = selLogi==null || l.a===selLogi || l.b===selLogi;
+      ctx.strokeStyle = l.allFluid?css('--fluid'):'#9aa4b2';
+      ctx.globalAlpha = selLogi==null? .4 : (incident?.95:.07);
+      ctx.lineWidth = 1+Math.sqrt(l.rate/LOGI.maxLink)*8;
+      arrow(pt(ha),pt(hb), logiRad(hb)+2); });
+    ctx.globalAlpha=1;
+    // hub markers sized by cargo handled; relay hubs (mostly transit) ringed
+    LOGI.hubs.forEach(h=>{ const p=pt(h), rad=logiRad(h), sel=h.id===selLogi;
+      const incident = selLogi==null || h.id===selLogi ||
+        LOGI.links.some(l=>(l.a===selLogi&&l.b===h.id)||(l.b===selLogi&&l.a===h.id));
+      ctx.globalAlpha = incident? 1 : .14;
+      ctx.fillStyle = isRelay(h)? css('--warn') : '#6ea8d8';
+      ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill();
+      ctx.lineWidth=sel?3:1.5; ctx.strokeStyle=sel?'#fff':'#0e1116'; ctx.stroke();
+      if(isRelay(h)){ ctx.beginPath(); ctx.arc(p.x,p.y,rad+3,0,7);
+        ctx.strokeStyle=css('--warn'); ctx.lineWidth=1.2;
+        ctx.globalAlpha=incident?.9:.14; ctx.stroke(); }
+      if(incident && (rad>9||sel)){ ctx.globalAlpha=1; ctx.textAlign='center';
+        ctx.fillStyle='#fff'; ctx.font='600 16px ui-sans-serif';
+        ctx.fillText(clip(h.label||('hub '+h.id),16), p.x, p.y-rad-7);
+        ctx.fillStyle=css('--mut'); ctx.font='14px ui-sans-serif';
+        ctx.fillText(fmt(h.tput)+'/min', p.x, p.y+rad+17); } });
+    ctx.globalAlpha=1;
+    drawCargoLabels(LOGI.links, i=>pt(LOGI.hubs[i]),
+                    selLogi, selLogi!=null?rel:null, null);
   }
 
   function redraw(){
@@ -602,6 +745,7 @@ if(DATA.map){
     else { ctx.fillStyle='#0c1f33'; ctx.fillRect(view.tx,view.ty,B.imgW*view.s,B.imgH*view.s); }
 
     if(mapMode==='factory' && SP){ drawFactory(); return; }
+    if(mapMode==='transport' && SP){ drawTransport(); return; }
 
     const dim=cls=> offRes.has(cls) || (highlightRes && highlightRes!==cls);
 
@@ -654,7 +798,7 @@ if(DATA.map){
     ctx.save(); ctx.translate(hub.x,hub.y); ctx.rotate(Math.PI/4);
     ctx.fillStyle='#fff'; ctx.fillRect(-7,-7,14,14);
     ctx.fillStyle='#58a6ff'; ctx.fillRect(-5,-5,10,10); ctx.restore();
-    ctx.fillStyle='#fff'; ctx.font='600 11px ui-sans-serif'; ctx.textAlign='center';
+    ctx.fillStyle='#fff'; ctx.font='600 16px ui-sans-serif'; ctx.textAlign='center';
     ctx.fillText('HUB', hub.x, hub.y-13);
   }
   window.__map={redraw};
@@ -667,11 +811,11 @@ if(DATA.map){
       SP.regions.forEach(rg=>{ const p=pt(rg), d=Math.hypot(p.x-mx,p.y-my);
         if(d<=regRad(rg)+2 && d<rd){rd=d;rb=rg;} });
       if(rb){ cv.style.cursor='pointer';
-        showTip(e.clientX,e.clientY,`<div class="h">${rb.label_name} hub</div>`+
-          `<div class="m">${Math.ceil(rb.machines)} machines · ${fmt(rb.power)} MW · click for breakdown</div>`);
+        showTip(e.clientX,e.clientY,`<div class="h">${rb.label_name} ${isMine(rb)?'mine':'factory'}</div>`+
+          `<div class="m">${Math.ceil(rb.machines)} machines · ${fmt(rb.power)} MW · click to trace sourcing</div>`);
         return;
       }
-      // no hub under cursor -> hit-test the nearest flow arrow
+      // no factory under cursor -> hit-test the nearest sourcing arrow
       let lb=null,ld=7;
       SP.links.forEach((l,idx)=>{ if(selReg!=null && !traceUp.has(idx) && !traceDown.has(idx)) return;
         const pa=pt(regById[l.a]), pb=pt(regById[l.b]);
@@ -681,8 +825,34 @@ if(DATA.map){
           `<div class="m">${i.item}: ${fmt(i.rate)}/min</div>`).join('');
         const more=lb.items.length>5?`<div class="m">+${lb.items.length-5} more…</div>`:'';
         showTip(e.clientX,e.clientY,
-          `<div class="h">hub ${lb.a} → hub ${lb.b}</div>`+
+          `<div class="h">${regById[lb.a].label_name} → ${regById[lb.b].label_name}</div>`+
           `<div class="m">${fmt(lb.rate)}/min over ${lb.items.length} item(s)</div>`+items+more);
+      } else { hideTip(); if(!pan) cv.style.cursor='grab'; }
+      return;
+    }
+    if(mapMode==='transport' && SP){
+      if(!LOGI) buildLogistics();
+      let hb=null,hd=1e9;
+      LOGI.hubs.forEach(h=>{ const p=pt(h), d=Math.hypot(p.x-mx,p.y-my);
+        if(d<=logiRad(h)+2 && d<hd){hd=d;hb=h;} });
+      if(hb){ cv.style.cursor='pointer';
+        showTip(e.clientX,e.clientY,
+          `<div class="h">${clip(hb.label||('hub '+hb.id),20)}${isRelay(hb)?' · relay':''}</div>`+
+          `<div class="m">${fmt(hb.tput)}/min on trains · ${hb.members.length} factories`+
+          `${hb.transitVol>0.5?` · ${fmt(hb.transitVol)}/min passing through`:''}</div>`);
+        return;
+      }
+      let lb=null,ld=7;
+      LOGI.links.forEach(l=>{ if(selLogi!=null && l.a!==selLogi && l.b!==selLogi) return;
+        const pa=pt(LOGI.hubs[l.a]), pb=pt(LOGI.hubs[l.b]);
+        const d=segDist(mx,my,pa.x,pa.y,pb.x,pb.y); if(d<ld){ld=d;lb=l;} });
+      if(lb){ cv.style.cursor='pointer';
+        const items=lb.items.slice(0,5).map(i=>
+          `<div class="m">${i.item}: ${fmt(i.rate)}/min</div>`).join('');
+        const more=lb.items.length>5?`<div class="m">+${lb.items.length-5} more…</div>`:'';
+        showTip(e.clientX,e.clientY,
+          `<div class="h">${clip(LOGI.hubs[lb.a].label,14)} → ${clip(LOGI.hubs[lb.b].label,14)}</div>`+
+          `<div class="m">train · ${fmt(lb.rate)}/min over ${lb.items.length} item(s)</div>`+items+more);
       } else { hideTip(); if(!pan) cv.style.cursor='grab'; }
       return;
     }
@@ -738,30 +908,79 @@ if(DATA.map){
   function rowKV(label,val,color){ return `<div class="row"><span class="lbl">`+
     (color?`<span class="swatch" style="background:${color}"></span>`:'')+`${label}</span>`+
     `<span class="v">${val}</span></div>`; }
+  // Factories layer: production breakdown + where each input is SOURCED from.
   function regionDetail(rg){
     const d=document.getElementById('detail');
     let h=`<button class="close" onclick="window.__closeRegion()">×</button>`;
-    h+=`<h3>${rg.label_name} hub</h3>`;
+    h+=`<h3>${rg.label_name} ${isMine(rg)?'mine':'factory'}</h3>`;
     h+=`<div class="meta">${Math.ceil(rg.machines)} machines · ${fmt(rg.power)} MW · `+
        `@ (${(rg.x/100).toFixed(0)}, ${(rg.y/100).toFixed(0)}) m</div>`;
     const sec=(title,obj,color)=>{ const e=Object.entries(obj||{}); if(!e.length) return;
       h+=`<div class="grp">${title}</div>`;
       e.forEach(([k,v])=> h+=rowKV(k, fmt(v), color)); };
-    h+=`<div class="grp">Machines (size the site)</div>`;
-    Object.entries(rg.by_machine).forEach(([m,c])=> h+=rowKV(m, Math.ceil(c), regColor(rg)));
+    if(Object.keys(rg.by_machine||{}).length){
+      h+=`<div class="grp">Machines (size the site)</div>`;
+      Object.entries(rg.by_machine).forEach(([m,c])=> h+=rowKV(m, Math.ceil(c), regColor(rg))); }
     sec('Mined on-site / min', rg.mined, css('--raw'));
-    sec('Imported / min (consumed here)', rg.imported, css('--good'));
+    // imported inputs WITH provenance — the "where stuff comes from" feature
+    const imp=Object.entries(rg.imported||{});
+    if(imp.length){ h+=`<div class="grp">Imported / min · sourced from</div>`;
+      imp.sort((a,b)=>b[1]-a[1]).forEach(([k,v])=>{
+        const srcs=[...producersOf(rg.id,k)].map(s=>{ const r=regById[s];
+          return (r&&isMine(r)?'⛏ ':'')+(r?r.label_name:('hub '+s)); });
+        const from = srcs.length? [...new Set(srcs)].join(', ') : 'upstream';
+        h+=`<div class="row"><span class="lbl"><span class="swatch" style="background:${css('--good')}"></span>${k}</span><span class="v">${fmt(v)}</span></div>`;
+        h+=`<div class="row" style="border:0;padding:0 0 2px"><span class="lbl" style="color:var(--mut);font-size:11px;padding-left:16px">← ${from}</span><span class="v"></span></div>`;
+      });
+    }
     sec('Produced / min', rg.produces, css('--target'));
     sec('Exported / min (shipped out)', rg.exported, css('--warn'));
-    sec('Passing through / min (routed, not used)', rg.transit, css('--dim'));
     d.innerHTML=h; d.classList.add('on');
   }
-  window.__closeRegion=()=>{ selReg=null; computeTrace();
+  // Transport layer: logistics-hub transit view + the factories it consolidates.
+  function logisticsDetail(hub){
+    const d=document.getElementById('detail');
+    let h=`<button class="close" onclick="window.__closeRegion()">×</button>`;
+    h+=`<h3>${clip(hub.label||('hub '+hub.id),24)}${isRelay(hub)?' · relay':''}</h3>`;
+    h+=`<div class="meta">${fmt(hub.tput)}/min on trains · ${hub.members.length} factories · `+
+       `${Math.ceil(hub.machines)} mach · @ (${(hub.x/100).toFixed(0)}, ${(hub.y/100).toFixed(0)}) m</div>`;
+    const sec=(title,obj,color)=>{ const e=Object.entries(obj||{}).sort((a,b)=>b[1]-a[1]); if(!e.length) return;
+      h+=`<div class="grp">${title}</div>`; e.forEach(([k,v])=> h+=rowKV(k, fmt(v), color)); };
+    // net in / net out / transit, derived from aggregated train cargo
+    const items=new Set([...Object.keys(hub._in),...Object.keys(hub._out)]);
+    const inN={}, outN={}, thru={};
+    items.forEach(it=>{ const i=hub._in[it]||0, o=hub._out[it]||0, t=Math.min(i,o);
+      if(t>0.5) thru[it]=t; if(i-o>0.5) inN[it]=i-o; if(o-i>0.5) outN[it]=o-i; });
+    sec('Cargo in / min (used by its factories)', inN, css('--good'));
+    sec('Cargo out / min (shipped onward)', outN, css('--warn'));
+    sec('Passing through / min (relay, not used)', thru, css('--dim'));
+    h+=`<div class="grp">Factories consolidated (${hub.members.length})</div>`;
+    hub.memberRegs.slice().sort((a,b)=>(b.machines||0)-(a.machines||0)).slice(0,12)
+      .forEach(rg=> h+=rowKV((isMine(rg)?'⛏ ':'')+rg.label_name,
+        Math.ceil(rg.machines)+' mach', regColor(rg)));
+    if(hub.members.length>12) h+=rowKV(`+${hub.members.length-12} more`,'','');
+    const lines=LOGI.links.filter(l=>l.a===hub.id||l.b===hub.id).sort((a,b)=>b.rate-a.rate);
+    if(lines.length){ h+=`<div class="grp">Train lines (${lines.length})</div>`;
+      lines.forEach(l=>{ const o=l.a===hub.id?l.b:l.a, dir=l.a===hub.id?'→':'←';
+        h+=rowKV(`${dir} ${clip(LOGI.hubs[o].label,16)}`, fmt(l.rate)+'/min',
+                 l.allFluid?css('--fluid'):'#9aa4b2'); }); }
+    d.innerHTML=h; d.classList.add('on');
+  }
+  window.__closeRegion=()=>{ selReg=null; selLogi=null; computeTrace();
     document.getElementById('detail').classList.remove('on'); redraw(); };
   cv.addEventListener('click',e=>{
-    if(mapMode!=='factory' || !SP) return;
+    if(!SP || (mapMode!=='factory' && mapMode!=='transport')) return;
     if(downXY && Math.hypot(e.clientX-downXY.x,e.clientY-downXY.y)>5) return;  // was a drag
     const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left,my=e.clientY-r.top;
+    if(mapMode==='transport'){
+      if(!LOGI) buildLogistics();
+      let hb=null,hd=1e9;
+      LOGI.hubs.forEach(h=>{ const p=pt(h), d=Math.hypot(p.x-mx,p.y-my);
+        if(d<=logiRad(h)+3 && d<hd){hd=d;hb=h;} });
+      if(hb){ selLogi=hb.id; logisticsDetail(hb); redraw(); }
+      else window.__closeRegion();
+      return;
+    }
     let rb=null,rd=1e9;
     SP.regions.forEach(rg=>{ const p=pt(rg), d=Math.hypot(p.x-mx,p.y-my);
       if(d<=regRad(rg)+3 && d<rd){rd=d;rb=rg;} });
@@ -769,18 +988,41 @@ if(DATA.map){
     else { window.__closeRegion(); }
   });
 
-  // ---- mode toggle (Factories / Mining) ---------------------------------- //
-  function setMapMode(m){ mapMode=m; selReg=null; computeTrace(); hideTip();
+  // ---- layer toggle (Factories / Mining / Transport) + density slider ---- //
+  // The Transport layer owns a logistics-density slider: it sets the grid cell
+  // that bins production regions into logistics hubs. Drag it to collapse more
+  // stations into fewer train depots (coarser) or keep basins separate (finer).
+  let logiCtl=null;
+  function updateLogiCount(){ if(!logiCtl||!LOGI) return;
+    logiCtl.querySelector('#logiCount').textContent =
+      `${LOGI.hubs.length} hubs · ${LOGI.links.length} lines · ${Math.round(logiCell/100)} m grid`; }
+  function setMapMode(m){ mapMode=m; selReg=null; selLogi=null; computeTrace(); hideTip();
     document.getElementById('detail').classList.remove('on');
     document.querySelectorAll('#mapModes button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+    if(m==='transport'){ if(!LOGI) buildLogistics(); updateLogiCount(); }
+    if(logiCtl) logiCtl.style.display = m==='transport'?'block':'none';
     buildLegend(); redraw(); }
   const modesEl=document.getElementById('mapModes');
   if(SP){ modesEl.style.display='flex';
     modesEl.innerHTML=`<button data-mode="factory">Factories</button>`+
-                      `<button data-mode="mining">Mining</button>`;
+                      `<button data-mode="mining">Mining</button>`+
+                      `<button data-mode="transport">Transport</button>`;
     modesEl.querySelectorAll('button').forEach(b=>
       b.addEventListener('click',()=>setMapMode(b.dataset.mode)));
     modesEl.querySelector('button[data-mode="factory"]').classList.add('on');
+    // build the density slider (transport layer only)
+    logiCtl=document.createElement('div'); logiCtl.className='float';
+    logiCtl.style.cssText='left:50%;transform:translateX(-50%);top:12px;'+
+      'padding:7px 13px;z-index:6;display:none';
+    logiCtl.innerHTML='<div style="display:flex;align-items:center;gap:10px;font-size:11.5px">'+
+      '<span style="color:var(--mut)">Logistics density</span>'+
+      `<input id="logiRange" type="range" min="50000" max="400000" step="10000" value="${logiCell}" style="width:170px">`+
+      '<span id="logiCount" style="color:var(--ink);font-variant-numeric:tabular-nums"></span></div>';
+    document.getElementById('mapView').appendChild(logiCtl);
+    logiCtl.querySelector('#logiRange').addEventListener('input',ev=>{
+      logiCell=+ev.target.value; selLogi=null; buildLogistics(); updateLogiCount();
+      document.getElementById('detail').classList.remove('on');
+      buildLegend(); redraw(); });
   }
   buildLegend();
 

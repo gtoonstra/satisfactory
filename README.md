@@ -62,7 +62,8 @@ Flags: `--no-alternates`, `--exclude "Recipe Name" ...`, `--miner-clock 0.4`
 ## Visualize
 
 `--viz DIR` writes a **self-contained interactive HTML page** (no build step, no
-server, no CDN — just open `DIR/index.html` in a browser) with two linked views:
+server, no CDN — just open `DIR/index.html` in a browser) with a **Production
+flow** graph plus a geographic **Resource map** that splits into three layers:
 
 ```bash
 # Production-flow graph only
@@ -77,13 +78,28 @@ python -m satisfactory_opt "Heavy Modular Frame" --viz out/ --nodes nodes.json
   the shipped target on the right. Edges are belt/pipe flows sized by items/min.
   Hover a node to trace its flows; click any node for an inspector listing its
   inputs/outputs (or, for an item, what produces and consumes it).
-- **Resource map** — the real Satisfactory map with every resource node at its
-  true coordinates, the chosen mining sites and central hub overlaid, and belts
-  drawn hub↔site weighted by throughput. Pan/zoom, hover for details, click a
-  legend entry to isolate a resource.
+- **Resource map** — the real Satisfactory map, with three switchable layers
+  (top-left toggle) that **decouple production from logistics** so each stays
+  readable:
+  - **Factories** — production sites sized by machine count. Click one to trace
+    its **sourcing**: green arrows back to where each input is actually produced
+    or mined (following pass-through hops), orange to where its outputs go. The
+    inspector lists each imported item with its **provenance** (`← which
+    factory/⛏ mine`). Edge labels are filtered to *only* the selected factory's
+    resources, so they stay legible.
+  - **Mining** — on-site raw extraction per region (ore-coloured, sized by
+    ore/min); the legend isolates a resource across the whole map.
+  - **Transport** — the **logistics network**: nearby production regions are
+    grid-clustered into **logistics hubs** (intra-hub flows collapse to local
+    belts), and the surviving inter-hub trains are aggregated into lines sized by
+    items/min. Relay hubs that mostly route cargo through are ringed. A
+    **density slider** (top-centre) sets the grouping grid live — drag it to
+    collapse more stations into fewer depots or keep basins separate. The default
+    grid targets ~12 hubs for the map's spread; the readout shows
+    `hubs · lines · grid size`.
 
 The views are **linked**: from a raw resource's inspector, "show source nodes on
-map" jumps to the map and highlights exactly the sites feeding it.
+map" jumps to the Mining layer and highlights exactly the sites feeding it.
 
 The exporter writes `index.html` (data embedded inline), `solution.json`, and —
 for the map view — a copy of `map_bg.jpg`. The map backdrop lives in
