@@ -28,18 +28,9 @@ from dataclasses import dataclass
 
 from ortools.linear_solver import pywraplp
 
-from .data import GameData
+from .data import GameData, NUCLEAR_FUELS
 from .resources import map_limits
 
-GEN_POWER_MW = 2500.0
-# Nuclear Power Plant fuels (1.2): fuel className -> waste className (or None).
-NUCLEAR_FUELS = [
-    ("Desc_NuclearFuelRod_C", "Desc_NuclearWaste_C"),
-    ("Desc_PlutoniumFuelRod_C", "Desc_PlutoniumWaste_C"),
-    ("Desc_FicsoniumFuelRod_C", None),
-]
-# Reserve uranium for power: forbid non-power uranium sinks.
-URANIUM_NONPOWER_RECIPES = {"Recipe_NobeliskNuke_C"}
 # The uranium source itself is extraction-capped, not a closed-loop intermediate.
 URANIUM_SOURCE = "Desc_OreUranium_C"
 # Plutonium Waste is the only radioactive item --allow-waste may leave to
@@ -78,11 +69,10 @@ def solve(
     miner_clock: float = 1.0,
     mode: str = "ratio",
     constrain_power: bool = True,
+    power_margin: float = 1.2,
     allow_waste: bool = False,
 ) -> Solution:
     excluded_recipes = set(excluded_recipes or set())
-    if constrain_power:
-        excluded_recipes |= URANIUM_NONPOWER_RECIPES
     # Closed nuclear loop: every radioactive item (fuel rods, cells, pellets,
     # Uranium Waste) must be fully consumed -- the subsystem's only output is
     # electricity. Excludes the uranium-ore source and any explicit target.
@@ -109,15 +99,6 @@ def solve(
         items |= r.items
     items |= {t.item for t in targets}
 
-    # nuclear generators
-    fuels = [(f, w) for f, w in NUCLEAR_FUELS if gd.energy.get(f, 0) > 0] if constrain_power else []
-    G = {f: solver.NumVar(0.0, INF, f"G_{f}") for f, _ in fuels}
-    burn = {f: GEN_POWER_MW / gd.energy[f] * 60.0 for f, _ in fuels}  # rods/min per plant
-    for f, w in fuels:
-        items.add(f)
-        if w:
-            items.add(w)
-
     E = {it: solver.NumVar(0.0, float(caps.get(it, 0.0)), f"E_{it}")
          for it in items if it in gd.raw_resources}
 
@@ -129,11 +110,6 @@ def solve(
         expr = solver.Sum(terms) if terms else solver.Sum([])
         if it in E:
             expr = expr + E[it]
-        for f, w in fuels:                       # nuclear contributions
-            if it == f:
-                expr = expr - burn[f] * G[f]
-            if w and it == w:
-                expr = expr + burn[f] * gd.waste[f] * G[f]
         if it in target_items and mode == "ratio":
             solver.Add(expr - target_items[it] * T == 0)
         elif constrain_power and it in closed:
@@ -144,11 +120,13 @@ def solve(
         else:
             solver.Add(expr >= 0)
 
-    # power balance
+    # power balance: like a real grid, generation must exceed draw by a margin
+    # (default 20% headroom). Nuclear reactors are recipes, so this just relates
+    # their generated MW to every machine's drawn MW.
     if constrain_power:
-        consumed = solver.Sum([x[r.key] * r.power for r in recipes])
-        generated = solver.Sum([G[f] * GEN_POWER_MW for f, _ in fuels])
-        solver.Add(consumed - generated <= 0)
+        draw = solver.Sum([x[r.key] * r.power for r in recipes])
+        gen = solver.Sum([x[r.key] * r.gen_mw for r in recipes])
+        solver.Add(gen - power_margin * draw >= 0)
 
     if mode == "ratio":
         solver.Maximize(T)
@@ -183,20 +161,33 @@ def solve(
         if net > EPS:
             outputs[it] = net
 
-    extraction = {it: E[it].solution_value() for it in E if E[it].solution_value() > EPS}
+    # Report ACTUAL extraction need = net the recipes consume, not E's solution
+    # value: nothing in the objective pushes E down, so GLOP parks it at the cap
+    # (e.g. iron would read 92 100 when only ~32 000 is used). The true need is
+    # the recipes' net consumption of each raw item.
+    extraction = {}
+    for it in E:
+        need = -sum(rmap[k].rate(it) * c for k, c in used.items())  # consumed > 0
+        if need > EPS:
+            extraction[it] = need
     total_power = sum(rmap[k].power * c for k, c in used.items())
-    gens = {f: G[f].solution_value() for f, _ in fuels if G[f].solution_value() > EPS}
-    fuel_burn = {f: burn[f] * G[f].solution_value() for f in gens}
-    generated = sum(c * GEN_POWER_MW for c in gens.values())
+    generated = sum(rmap[k].gen_mw * c for k, c in used.items())
+
+    # reactors are recipes now: derive plant counts + fuel burn from their use.
+    gens: dict[str, float] = {}
+    fuel_burn: dict[str, float] = {}
+    for k, c in used.items():
+        fuel = gd.generator_fuel.get(k)
+        if fuel is None:
+            continue
+        gens[fuel] = gens.get(fuel, 0.0) + c                 # 1 machine = 1 plant
+        fuel_burn[fuel] = fuel_burn.get(fuel, 0.0) - rmap[k].rate(fuel) * c
 
     # net radioactive waste left over (0 in the closed-loop default)
-    waste_classes = {w for _, w in NUCLEAR_FUELS if w}
+    waste_classes = {w for w in NUCLEAR_FUELS.values() if w}
     waste_per_min = {}
     for w in waste_classes:
         net = sum(rmap[k].rate(w) * c for k, c in used.items())
-        for f, wf in fuels:
-            if wf == w:
-                net += burn[f] * gd.waste[f] * G[f].solution_value()
         if net > EPS:
             waste_per_min[w] = net
 
