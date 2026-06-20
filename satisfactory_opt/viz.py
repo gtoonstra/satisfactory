@@ -354,6 +354,19 @@ def build_viz_data(gd: GameData, sol: Solution, *,
     return data
 
 
+def _logi_cell_for(regions: list[dict], target_hubs: int) -> int:
+    """Logistics grid cell (game units) that bins `regions` into ~target_hubs
+    hubs, matching the visualizer's live grid-binning. Cells are the slider's
+    50000..400000 step-10000 range; ties prefer the larger (cleaner) cell. A
+    very large target_hubs therefore floors to 50000 = maximum hub density."""
+    import math
+    def hubs(cell: int) -> int:
+        return len({(math.floor(r["x"] / cell), math.floor(r["y"] / cell))
+                    for r in regions})
+    cells = range(400_000, 40_000, -10_000)          # large->small => fewer->more hubs
+    return min(cells, key=lambda c: (abs(hubs(c) - target_hubs), -c))
+
+
 def write_visualization(gd: GameData, sol: Solution, out_dir: str, *,
                         nodes: list[dict] | None = None,
                         targets: list[str] | None = None,
@@ -361,11 +374,17 @@ def write_visualization(gd: GameData, sol: Solution, out_dir: str, *,
                         congestion: float = 0.0,
                         free_capacity: float = 400.0,
                         max_products: int | None = None,
-                        max_machines: float | None = None) -> str:
+                        max_machines: float | None = None,
+                        target_hubs: int | None = None) -> str:
     os.makedirs(out_dir, exist_ok=True)
     data = build_viz_data(gd, sol, nodes=nodes, targets=targets,
                           region_radius=region_radius, congestion=congestion,
                           free_capacity=free_capacity, max_products=max_products, max_machines=max_machines)
+    # initial logistics-hub density for this page (slider still tunes it live):
+    # pin the grid cell that opens at ~target_hubs hubs over the region span
+    if target_hubs is not None and data.get("spatial", {}).get("regions"):
+        data["spatial"]["logiCell"] = _logi_cell_for(
+            data["spatial"]["regions"], target_hubs)
 
     with open(os.path.join(out_dir, "solution.json"), "w") as fh:
         json.dump(data, fh, indent=2)

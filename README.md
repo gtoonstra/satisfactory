@@ -162,6 +162,15 @@ visualizer:
 python -m satisfactory_opt all --basket points --nodes nodes.json --spatial --viz out/
 ```
 
+**Live examples** (rendered output of this command, no install needed):
+[the layout gallery](https://gtoonstra.github.io/satisfactory/) — a
+[typical balanced layout](https://gtoonstra.github.io/satisfactory/ex1/) (29
+build regions, ~12 hubs), the same whole-map basket split into
+[200 build regions over 15 logistics hubs](https://gtoonstra.github.io/satisfactory/ex2/)
+(`--region-radius 6000 --target-hubs 15`), and
+[200 regions at maximum hub density](https://gtoonstra.github.io/satisfactory/ex3/)
+(`--target-hubs 999`).
+
 That solves with power **on** and the **closed nuclear loop (zero waste)** by
 default. Drop the uranium chain entirely while you're still on coal/fuel with
 `--no-power`; allow Plutonium Waste to accumulate (≈12 % more output) with
@@ -217,10 +226,12 @@ python -m satisfactory_opt "Heavy Modular Frame" --viz out/ --nodes nodes.json
   (top-left toggle) that **decouple production from logistics** so each stays
   readable:
   - **Factories** — production sites sized by machine count, **named by the
-    biome they sit in** (`biomes.py`). Biome regions come from the wiki's
-    authoritative biome map (which shares this project's world extent and
-    orientation exactly), encoded as seed points; a factory takes the biome of
-    its nearest seed. A biome with one factory just takes the biome name (*Dune
+    biome they sit in** (`biomes.py`). Biome regions come from a hand-painted
+    biome map (`assets/hue_map.png`, one flat colour per biome) with
+    `assets/color_map.txt` mapping each colour to a name; `bake_biomes.py`
+    snaps every pixel to its nearest biome colour and bakes an indexed raster
+    (`biome_raster.py`), so naming a factory is a direct pixel lookup at its map
+    position. A biome with one factory just takes the biome name (*Dune
     Desert*); where a biome has several they're numbered by size (*Rocky Desert
     I*, *Rocky Desert II*, …). Click one
     to trace its **sourcing**: green arrows back to where each input is actually
@@ -235,8 +246,9 @@ python -m satisfactory_opt "Heavy Modular Frame" --viz out/ --nodes nodes.json
     belts), and the surviving inter-hub trains are aggregated into lines sized by
     items/min. Relay hubs that mostly route cargo through are ringed. A
     **density slider** (top-centre) sets the grouping grid live — drag it to
-    collapse more stations into fewer depots or keep basins separate. The default
-    grid targets ~12 hubs for the map's spread; the readout shows
+    collapse more stations into fewer depots or keep basins separate. The page
+    opens at ~12 hubs by default, or at `--target-hubs N` if you set it at
+    generation time (the slider still re-tunes it live); the readout shows
     `hubs · lines · grid size`.
 
 The views are **linked**: from a raw resource's inspector, "show source nodes on
@@ -354,7 +366,9 @@ map, so that material movement is minimized with **no central destination**.
 python -m satisfactory_opt "Heavy Modular Frame" --no-power --nodes nodes.json --spatial
 ```
 
-- Mining sites are clustered into **basins** (`--region-radius`, game units).
+- Mining sites are clustered into **basins** (`--region-radius`, game units;
+  smaller → more, tighter regions — e.g. the default 40 000 yields ~29 regions,
+  6 000 yields ~200).
 - It places `x[recipe, region]` machines and `f[item, region→region]` shipments
   to **minimize `Σ flow × weight × distance`**. Flow rate already encodes
   "volume" (ore moves at ~92 000/min, computers at ~10/min), and `weight` adds

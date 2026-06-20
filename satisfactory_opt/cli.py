@@ -108,6 +108,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--viz", metavar="DIR",
                    help="write an interactive HTML visualizer to DIR (open DIR/index.html). "
                         "Pass --nodes too for the geographic resource-map view.")
+    p.add_argument("--target-hubs", type=int, default=None,
+                   help="initial logistics-hub count the Transport layer opens at "
+                        "(default ~12; the density slider still tunes it live). "
+                        "Large values open at maximum hub density.")
     p.add_argument("--json", action="store_true", help="emit JSON instead of a report")
     p.add_argument("--data", default=None, help="path to data.json")
     args = p.parse_args(argv)
@@ -171,7 +175,8 @@ def main(argv: list[str] | None = None) -> int:
                                   congestion=args.congestion,
                                   free_capacity=args.free_capacity,
                                   max_products=args.max_products,
-                                  max_machines=args.max_machines)
+                                  max_machines=args.max_machines,
+                                  target_hubs=args.target_hubs)
         msg = f"visualizer written: {out}"
         if nodes is None:
             msg += "  (add --nodes nodes.json for the geographic map view)"

@@ -482,15 +482,18 @@ if(DATA.map){
     SP.links.forEach((l,i)=> SP.linkIdx[l.a+'>'+l.b]=i);
     SP.shipments.forEach(s=>{ (SP.byDstItem[s.dst+'|'+s.item_name]=SP.byDstItem[s.dst+'|'+s.item_name]||[]).push(s);
                               (SP.bySrcItem[s.src+'|'+s.item_name]=SP.bySrcItem[s.src+'|'+s.item_name]||[]).push(s); });
-    // Data-driven default density: pick a grid cell that yields ~12 logistics
-    // hubs over the area the regions actually span. This is the "reasonable
-    // number" — coarse enough to collapse stations into train depots, fine
-    // enough that distinct basins stay separate. The slider tunes it live.
-    if(SP.regions.length){
+    // Default density. SP.logiCell (computed at generation time for a requested
+    // hub count) pins the opening grid exactly; otherwise pick a grid cell that
+    // yields ~12 logistics hubs over the area the regions span — the
+    // "reasonable number": coarse enough to collapse stations into train depots,
+    // fine enough that distinct basins stay separate. The slider tunes it live.
+    if(SP.logiCell){
+      logiCell=SP.logiCell;
+    } else if(SP.regions.length){
       const xs=SP.regions.map(r=>r.x), ys=SP.regions.map(r=>r.y);
       const w=Math.max(...xs)-Math.min(...xs), h=Math.max(...ys)-Math.min(...ys);
       const area=Math.max(1, w*h);
-      logiCell=Math.min(360000, Math.max(60000,
+      logiCell=Math.min(400000, Math.max(50000,
         Math.round(Math.sqrt(area/12)/10000)*10000));
     }
   }
