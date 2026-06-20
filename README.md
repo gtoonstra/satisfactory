@@ -43,8 +43,33 @@ story of how it does it.
 The hard part isn't solving an optimization — it's **defining what a good layout
 even is.** "Minimize transport" alone collapses everything into one giant blob
 (zero distance if it's all in one place). "Spread it out" gives you spaghetti
-again. A good plan is a *balance*, and most of the engineering here is in
-encoding that balance so a solver can find it. It runs in two stages.
+again. A good plan is a *balance*, and "good" turns out to mean several things at
+once that don't reduce to a single number:
+
+- **The plan is guidance, not coordinates.** You can't always build at the exact
+  spot or hub centroid the solver picks — the ground there may be unbuildable
+  (the Titan Forest is infamous). So the output has to be a *region* and a set of
+  *flows* you can nudge onto friendlier terrain, not a pin you're forced to honour
+  to the metre.
+- **What are you even optimizing for?** Power is the clearest example: do you want
+  the **maximum power yield** the uranium can give, or just **enough to support
+  the main build** and nothing more? Those are different factories.
+- **And toward which goods?** If you want to max out the build and burn every
+  resource node, what comes out the end — a few **high-tier end products**, or a
+  spread weighted toward **ammo and bulk parts**? The same nodes support wildly
+  different baskets, and only you know which one you want (see `--basket`).
+- **How many factories?** This one matters for how the game actually plays, not
+  just the math. Fewer, bigger mega-factories tank your **FPS** and demand
+  **enormous logistics chains** — high-tier items move at tiny volumes, so feeding
+  one giant assembler pulls thin trickles from all over the map. Spreading the
+  same work across more, smaller sites distributes the load and keeps each one
+  buildable. So the *count* of factories is itself something you want to steer.
+
+In short: finding a global optimum for *what to build* is the easy part. The craft
+is layering **soft and hard constraints** on top so the model also lands where you
+want it on the axes above — how much power, which goods, and especially how many
+factories and how many transport hubs. That balance is what the engineering here
+encodes, and it runs in two stages.
 
 **Stage 1 — *what* to build (`solver.py`).** Given your target end-items, a
 linear program (Google OR-Tools / GLOP) picks the recipe mix — including
