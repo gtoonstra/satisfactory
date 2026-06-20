@@ -192,11 +192,12 @@ python -m satisfactory_opt "Heavy Modular Frame" --viz out/ --nodes nodes.json
   (top-left toggle) that **decouple production from logistics** so each stays
   readable:
   - **Factories** — production sites sized by machine count, **named by the
-    biome they sit in** (`biomes.py`): each factory's centroid is matched to the
-    biome whose **bounding box contains** it (box containment, not nearest-anchor,
-    so factories near a biome edge don't snap to the wrong side). A biome with one
-    factory just takes the biome name (*Dune Desert*); where a biome has several
-    they're numbered by size (*Rocky Desert I*, *Rocky Desert II*, …). Click one
+    biome they sit in** (`biomes.py`). Biome regions come from the wiki's
+    authoritative biome map (which shares this project's world extent and
+    orientation exactly), encoded as seed points; a factory takes the biome of
+    its nearest seed. A biome with one factory just takes the biome name (*Dune
+    Desert*); where a biome has several they're numbered by size (*Rocky Desert
+    I*, *Rocky Desert II*, …). Click one
     to trace its **sourcing**: green arrows back to where each input is actually
     produced or mined (following pass-through hops), orange to where its outputs
     go. The inspector lists each imported item with its **provenance** (`← which
