@@ -39,6 +39,7 @@ from .data import GameData
 from .solver import Solution
 from .placement import stage_recipes, assign_and_place, node_rate
 from .spatial_layout import spatial_layout
+from .biomes import biome_for
 
 ASSET_MAP = os.path.join(os.path.dirname(__file__), "assets", "map_bg.jpg")
 TEMPLATE = os.path.join(os.path.dirname(__file__), "assets", "viz_template.html")
@@ -134,6 +135,34 @@ def _transit_flow(gd, imp: dict, exp: dict) -> dict:
         if t > 0.5:
             out[gd.item_name.get(it, it)] = t
     return _alpha(out)
+
+
+def _roman(n: int) -> str:
+    """1->'I', 2->'II', ... small numerals for disambiguating duplicate names."""
+    vals = [(1000, "M"), (900, "CM"), (500, "D"), (400, "CD"), (100, "C"),
+            (90, "XC"), (50, "L"), (40, "XL"), (10, "X"), (9, "IX"),
+            (5, "V"), (4, "IV"), (1, "I")]
+    out = ""
+    for v, sym in vals:
+        while n >= v:
+            out += sym
+            n -= v
+    return out
+
+
+def _uniquify_names(regions: list[dict]) -> None:
+    """Factories are named by biome, so many share a name. Make each unique in
+    place: a lone factory in a biome keeps the bare biome name; where a biome has
+    several, all get a Roman numeral ('Biome I', 'Biome II', …) ordered by size
+    (most machines first)."""
+    groups: dict[str, list[dict]] = {}
+    for rg in regions:
+        groups.setdefault(rg["label_name"], []).append(rg)
+    for base, grp in groups.items():
+        if len(grp) < 2:
+            continue
+        for i, rg in enumerate(sorted(grp, key=lambda r: -r["machines"])):
+            rg["label_name"] = f"{base} {_roman(i + 1)}"
 
 
 def build_viz_data(gd: GameData, sol: Solution, *,
@@ -282,10 +311,14 @@ def build_viz_data(gd: GameData, sol: Solution, *,
                 for k, c in rp.recipes.items():
                     m = gd.machine_name.get(gd.recipes[k].machine, gd.recipes[k].machine)
                     by_machine[m] = by_machine.get(m, 0.0) + c
+                # factory name = its biome (box containment); identical names in
+                # the same biome are disambiguated by Roman numeral below.
+                biome = biome_for(rp.pos[0], rp.pos[1], MAP_BOUNDS)
                 regions.append({
                     "id": rp.id, "x": rp.pos[0], "y": rp.pos[1],
                     "machines": rp.machines, "power": rp.power_mw,
-                    "label": rp.label, "label_name": gd.item_name.get(rp.label, rp.label),
+                    "label": rp.label, "biome": biome,
+                    "label_name": biome,
                     "machine_key": gd.recipes[max(rp.recipes, key=rp.recipes.get)].machine
                                    if rp.recipes else "",
                     "by_machine": _alpha(by_machine),
@@ -305,6 +338,7 @@ def build_viz_data(gd: GameData, sol: Solution, *,
                     "transit": _transit_flow(gd, rp.imports, rp.exports),
                     "footprint": [[x, y] for x, y in (rp.footprint or [])],
                 })
+            _uniquify_names(regions)
             data["spatial"] = {
                 "regions": regions,
                 "shipments": [{

@@ -414,8 +414,9 @@ def spatial_layout(
                 net[it] = net.get(it, 0.0) + gd.recipes[k].rate(it) * c
         net = {it: v for it, v in net.items()
                if v > EPS and it not in gd.raw_resources}
-        # a pure-mining outpost (no factory) is labelled by its dominant ore
-        label = (max(net, key=net.get) if net
+        # name the factory by its most-processed ('top-level') output, breaking
+        # ties on volume; a pure-mining outpost falls back to its dominant ore
+        label = (max(net, key=lambda it: (gd.item_depth.get(it, 0), net[it])) if net
                  else (max(mined, key=mined.get) if mined else ""))
         footprint = [(s.centroid[0], s.centroid[1]) for s in regions[g].mine_sites]
         rplans.append(RegionPlan(

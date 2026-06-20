@@ -272,7 +272,7 @@ def proximity_layout(
              for (s, d, it), (r, dist) in link_agg.items()]
     links.sort(key=lambda l: -l.rate * l.dist)
 
-    # label each site by the produced item with the largest net output
+    # label each site by its most-processed ('top-level') output, ties on volume
     for st in sites:
         net: dict[str, float] = {}
         for k, c in st.recipes.items():
@@ -281,7 +281,8 @@ def proximity_layout(
                 net[it] = net.get(it, 0.0) + r.rate(it) * c
         net = {it: v for it, v in net.items()
                if v > 1e-6 and it not in gd.raw_resources}
-        st.label = max(net, key=net.get) if net else ""
+        st.label = max(net, key=lambda it: (gd.item_depth.get(it, 0), net[it])) \
+            if net else ""
 
     sites.sort(key=lambda s: -s.machines)
     return LayoutPlan(

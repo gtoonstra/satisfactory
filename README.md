@@ -1,19 +1,112 @@
 # Satisfactory production optimizer
 
-A constraint solver that, given a target set of end items, computes the
-resource allocation and recipe mix (including **alternate recipes**) that
-**maximizes a balanced/weighted basket of outputs** within the map's raw
-resource limits — then suggests **where to build** (smelt at the source, ship a
-compact set of refined goods to a central hub).
+## The problem
 
-It is a **linear program** solved with Google OR-Tools (GLOP):
+Early game, placement is trivial: a node is right there, so you drop a smelter on
+top of it and a constructor next to that. It works because everything you need is
+local.
 
-- variable per recipe = number of machines (fractional allowed),
-- variable per raw resource = extraction rate, capped by whole-map node totals,
-- variable per nuclear fuel = number of Nuclear Power Plants,
-- every item: production ≥ consumption (byproducts may be surplus),
-- machine power draw ≤ nuclear power generated,
-- target items pinned to your requested ratio; maximize the basket scale.
+As the game advances that breaks down. The parts you want take a dozen
+ingredients pulled from resources scattered across the whole map, and "just put
+it next to the node" stops being an option — there is no single node, there are
+twenty, in different biomes. So you start patching: a train here, a drone station
+there, a belt running halfway across the world because *that one* resource only
+shows up in the desert. The result is **railroad spaghetti and drone stations
+everywhere** — a logistics network that grew by accident, that you are forever
+rerouting, and that you eventually tear down and rebuild because it was never
+laid out on purpose.
+
+## The objective
+
+I wanted the opposite: to **build the world as stable as possible**, so it needs
+as few changes as possible. Lay the map out *once*, correctly, and then spend my
+time on the part that actually matters — the **beauty of the build** — without
+the dread of knowing I'll have to rip it out later to make room for the thing I
+didn't plan for.
+
+The key realization is that Satisfactory makes this tractable in a way most
+factory games don't: **resources are infinite and always in the same place.**
+Iron node totals never run out and never move. That means the optimal *general
+shape* of your factory — which regions make what, and what flows between them —
+is a fixed, knowable thing. You can compute it ahead of time. So instead of
+discovering the layout by playing into a corner, you can solve for it: a resolver
+that figures out the **general areas** to build in and **what each area should
+produce**, once, for your full end-state — and then you build incrementally
+*toward* that plan, knowing every line you lay is part of the final picture and
+will never need to move.
+
+So this solver optimizes for exactly that. The rest of this README is the whole
+story of how it does it.
+
+## How it works (and why "good" is hard)
+
+The hard part isn't solving an optimization — it's **defining what a good layout
+even is.** "Minimize transport" alone collapses everything into one giant blob
+(zero distance if it's all in one place). "Spread it out" gives you spaghetti
+again. A good plan is a *balance*, and most of the engineering here is in
+encoding that balance so a solver can find it. It runs in two stages.
+
+**Stage 1 — *what* to build (`solver.py`).** Given your target end-items, a
+linear program (Google OR-Tools / GLOP) picks the recipe mix — including
+**alternate recipes** — that maximizes a balanced/weighted basket of outputs
+within the map's real raw-resource limits:
+
+- a variable per recipe = number of machines (fractional allowed),
+- a variable per raw resource = extraction rate, capped by whole-map node totals,
+- every item: production ≥ consumption (byproducts may run surplus),
+- target items pinned to your requested ratio; maximize the basket scale `T`.
+- **Power is endogenous and part of the same LP.** Nuclear reactors are
+  first-class recipes that consume fuel rods, emit waste, and generate MW, so the
+  whole `uranium → fuel rod → waste → plutonium → ficsonium` cascade is solved
+  together and machine draw must stay under generated MW (with a margin). Uranium
+  extraction is therefore the hard power ceiling. See [Power](#power-nuclear-endogenous-waste-free-by-default).
+
+This stage answers *how many machines of each recipe*, but says nothing about
+*where*. It's a global optimum, so it's deterministic — same targets, same answer.
+
+**Stage 2 — *where* to build it (`spatial_layout.py`).** This is where "good"
+gets subtle. A second LP keeps Stage 1's recipe totals fixed and decides how many
+machines of each recipe go in each **region**, plus what ships between regions. It
+minimizes:
+
+```
+transport  =  Σ  flow[item, a→b] · weight[item] · distance(a, b)
+congestion =  λ · Σ_region  convex(machines_in_region)
+```
+
+- **Regions** are *basins*: real mining sites clustered by proximity
+  (`--region-radius`). Each region knows the raw resources it can extract locally.
+- **The transport term** is what keeps bulk local. `flow` is already in items/min,
+  so it carries the volume difference for free — ore moves at ~92 000/min,
+  computers at ~10/min — and `weight` adds the *medium* difference (fluids = 2,
+  since pipes carry half a belt's throughput). The upshot: smelting pins itself
+  next to the ore because moving ore is enormously expensive, while compact,
+  high-tier parts are cheap enough to travel, so they're the only things that ride
+  the long lines. **There is no central hub term** — final outputs have no
+  downstream demand, so nothing is forced to converge; sub-factories simply settle
+  next to whatever they trade material with.
+- **The congestion term** is what prevents the blob. It's a *convex* penalty on
+  machines per region: each region builds `--free-capacity` machines for free,
+  then every additional machine costs progressively more. Past a point it's
+  cheaper to spill into a neighbouring basin than to keep packing one region, so
+  no single area swallows the whole factory. Turning `--congestion` up gives you
+  more, smaller, specialized clusters (more transport); turning it to `0` gives
+  the pure transport minimum (a few mega-clusters). **This single knob is the
+  transport-vs-sprawl tradeoff** — a solve-time CLI flag that changes the actual
+  layout (not the Transport-layer density slider, which only re-clusters the
+  already-solved plan for display).
+
+Because it's one LP with one global optimum, the layout is **deterministic and
+therefore stable** — exactly the property the objective demanded. Solve your full
+end-state basket once; early builds are a subset of the final map and never need
+relocating. Typical results are ~90–96 % less material movement than shipping
+everything to a single hub.
+
+What it deliberately does **not** optimize: the aesthetics of an individual
+factory, exact machine-by-machine placement, or belt routing within a region.
+Those are the parts you *want* to build by hand — the solver's job is to hand you
+stable regions and a stable logistics skeleton so that hand-built beauty never has
+to be torn down.
 
 ## Data
 
@@ -34,6 +127,23 @@ pip install -r requirements.txt   # ortools
 ```
 
 ## Use (CLI)
+
+The headline command — lay out a factory that builds **the entire end-game
+spread** across the map, with full geographic placement and the interactive
+visualizer:
+
+```bash
+# Whole-map, waste-free, spatial layout + visualizer (the "build the world" run)
+python -m satisfactory_opt all --basket points --nodes nodes.json --spatial --viz out/
+```
+
+That solves with power **on** and the **closed nuclear loop (zero waste)** by
+default. Drop the uranium chain entirely while you're still on coal/fuel with
+`--no-power`; allow Plutonium Waste to accumulate (≈12 % more output) with
+`--allow-waste`. See [Power](#power-nuclear-endogenous-waste-free-by-default) for
+what those two switches actually change.
+
+Smaller, targeted runs:
 
 ```bash
 # Balanced 1:1 basket of two end items, whole-map resources
@@ -81,10 +191,15 @@ python -m satisfactory_opt "Heavy Modular Frame" --viz out/ --nodes nodes.json
 - **Resource map** — the real Satisfactory map, with three switchable layers
   (top-left toggle) that **decouple production from logistics** so each stays
   readable:
-  - **Factories** — production sites sized by machine count. Click one to trace
-    its **sourcing**: green arrows back to where each input is actually produced
-    or mined (following pass-through hops), orange to where its outputs go. The
-    inspector lists each imported item with its **provenance** (`← which
+  - **Factories** — production sites sized by machine count, **named by the
+    biome they sit in** (`biomes.py`): each factory's centroid is matched to the
+    biome whose **bounding box contains** it (box containment, not nearest-anchor,
+    so factories near a biome edge don't snap to the wrong side). A biome with one
+    factory just takes the biome name (*Dune Desert*); where a biome has several
+    they're numbered by size (*Rocky Desert I*, *Rocky Desert II*, …). Click one
+    to trace its **sourcing**: green arrows back to where each input is actually
+    produced or mined (following pass-through hops), orange to where its outputs
+    go. The inspector lists each imported item with its **provenance** (`← which
     factory/⛏ mine`). Edge labels are filtered to *only* the selected factory's
     resources, so they stay legible.
   - **Mining** — on-site raw extraction per region (ore-coloured, sized by
@@ -101,8 +216,43 @@ python -m satisfactory_opt "Heavy Modular Frame" --viz out/ --nodes nodes.json
 The views are **linked**: from a raw resource's inspector, "show source nodes on
 map" jumps to the Mining layer and highlights exactly the sites feeding it.
 
-The exporter writes `index.html` (data embedded inline), `solution.json`, and —
-for the map view — a copy of `map_bg.jpg`. The map backdrop lives in
+### Two overlay grids: the build plan and the transport plan
+
+The result is really **two grids laid over the same map**, and you read them for
+different things:
+
+1. **The build plan (Factories layer)** — *where* each thing is made. This is the
+   layer for reasoning about **sourcing**: click a factory and it traces every
+   input back to where it is actually produced or mined, even if that's the far
+   side of the map. Material effectively flows *up* this grid — raw ore and
+   intermediates climb through the network toward the factory that finally
+   consumes them.
+2. **The transport plan (Transport layer)** — *how* to move it. Nearby regions
+   collapse into a number of **logistics hubs you choose** (the density slider),
+   and the surviving long links are your **trains**. Within a hub's territory you
+   run local belts from the train station out to the factories it serves and load
+   whatever that area ships onward. Cargo is **transitive** through hubs — a relay
+   hub just passes material through — so it is still traceable to its origin here,
+   but the Factories layer makes that tracing easier.
+
+Why this matters when you actually build it:
+
+- Every link carries a known rate in **items/min**, so each station's throughput
+  is known too. You can size **exactly how many cargo platforms and parallel
+  trains** a route needs up front — and never rip them out later because you
+  under-built. Where a link's volume doesn't justify rail, the rate tells you
+  whether **drones or trucks** fit instead.
+- The hub count is yours (slider): a few large depots, or many small ones.
+- **Placements are guidance, not gospel.** The solver gives you the right
+  *region* and the right *flows*; the exact tile is yours to nudge. The Titan
+  Forest, for one, is notoriously awkward to build in — so slide that hub onto
+  friendlier ground nearby and plan around it. The plan stays valid because what
+  matters is *which region trades what*, not the centimetre.
+
+The exporter writes `index.html` (all data embedded inline — nothing is fetched
+at runtime), `solution.json`, and — for the map view — a copy of `map_bg.jpg`. To
+**view or post** the result you only need **`index.html` + `map_bg.jpg`** kept
+side by side; `solution.json` is just for inspection and can be dropped. The map backdrop lives in
 `satisfactory_opt/assets/`; refresh it with `python fetch_map.py`. The
 node→pixel calibration uses the public SCIM world bounds
 (`west=-324698.83, east=425301.83, north=-375000, south=375000`).

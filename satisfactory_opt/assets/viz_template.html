@@ -687,7 +687,7 @@ if(DATA.map){
       else { ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill(); ctx.stroke(); }
       if(!mine && inTrace && (rad>11||sel)){ ctx.globalAlpha=1; ctx.textAlign='center';
         ctx.fillStyle='#fff'; ctx.font='600 16px ui-sans-serif';
-        ctx.fillText(clip(rg.label_name,16), p.x, p.y-rad-7);
+        ctx.fillText(rg.label_name, p.x, p.y-rad-7);
         ctx.fillStyle=css('--mut'); ctx.font='14px ui-sans-serif';
         ctx.fillText(Math.ceil(rg.machines)+' mach', p.x, p.y+rad+17); } });
     ctx.globalAlpha=1;

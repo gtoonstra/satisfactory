@@ -185,6 +185,33 @@ class GameData:
     def recipes_for(self, item: str) -> list[Recipe]:
         return [r for r in self.recipes.values() if item in r.outputs]
 
+    @cached_property
+    def item_depth(self) -> dict[str, int]:
+        """Production depth ('tier') of each item: 0 for raw resources, else
+        1 + the max depth of a recipe's inputs, minimised over the recipes that
+        make it. Lets us label a factory by its most-processed ('top-level')
+        output instead of its highest-volume one. Cyclic chains (packaged
+        fluids, recycled plastic/rubber) are resolved by iterative relaxation."""
+        INF = float("inf")
+        depth: dict[str, float] = {it: 0.0 for it in self.raw_resources}
+        for r in self.recipes.values():
+            for it in list(r.inputs) + list(r.outputs):
+                depth.setdefault(it, INF)
+        for _ in range(64):
+            changed = False
+            for r in self.recipes.values():
+                in_d = max((depth[i] for i in r.inputs), default=0.0)
+                if in_d == INF:
+                    continue
+                cand = in_d + 1.0
+                for o in r.outputs:
+                    if cand < depth[o]:
+                        depth[o] = cand
+                        changed = True
+            if not changed:
+                break
+        return {it: (int(d) if d != INF else 0) for it, d in depth.items()}
+
     def producible_items(self, extra_seed: set[str] | tuple = ()) -> set[str]:
         """Closure of items reachable from raw resources (plus extra_seed) by
         chaining whole recipes. extra_seed lets callers inject feedstocks that
