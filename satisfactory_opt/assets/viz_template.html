@@ -1,0 +1,1058 @@
+<title>Satisfactory Factory Visualizer</title>
+<style>
+  :root{
+    --bg:#0e1116; --panel:#161b22; --panel2:#1c232d; --line:#2a323d;
+    --ink:#e6edf3; --mut:#8b96a5; --dim:#5b6675; --acc:#58a6ff;
+    --raw:#d9a441; --fluid:#5aa9e6; --target:#5fc97a; --inter:#9aa4b2;
+    --good:#5fc97a; --warn:#e6a23c; --bad:#e35d6a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--ink);
+    font:13px/1.45 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100vh}
+  header{display:flex;align-items:center;gap:18px;padding:10px 16px;
+    border-bottom:1px solid var(--line);background:var(--panel);flex:0 0 auto}
+  header h1{font-size:14px;font-weight:650;letter-spacing:.2px;margin:0;white-space:nowrap}
+  header h1 .t{color:var(--target)}
+  .stats{display:flex;gap:16px;flex-wrap:wrap;flex:1 1 auto}
+  .stat{display:flex;flex-direction:column;line-height:1.15}
+  .stat b{font-size:13px;font-weight:650}
+  .stat span{font-size:10.5px;color:var(--mut);text-transform:uppercase;letter-spacing:.5px}
+  .tabs{display:flex;gap:4px;background:var(--panel2);padding:3px;border-radius:9px;flex:0 0 auto}
+  .tabs button{all:unset;cursor:pointer;padding:6px 16px;border-radius:7px;font-size:12.5px;
+    font-weight:600;color:var(--mut)}
+  .tabs button.on{background:var(--acc);color:#06101f}
+  main{position:relative;flex:1 1 auto;min-height:0}
+  .view{position:absolute;inset:0;display:none}
+  .view.on{display:block}
+  svg{width:100%;height:100%;display:block;cursor:grab}
+  svg.drag{cursor:grabbing}
+  canvas{position:absolute;inset:0;width:100%;height:100%;cursor:grab}
+  canvas.drag{cursor:grabbing}
+
+  .node rect{stroke-width:1.2}
+  .node text{font-size:11px;fill:var(--ink);pointer-events:none;dominant-baseline:middle}
+  .node .sub{font-size:9px;fill:var(--mut)}
+  .link{fill:none;stroke-linecap:round}
+  .faded .link{opacity:.05}
+  .faded .node{opacity:.18}
+  .link.hot{opacity:.95 !important}
+  .node.hot{opacity:1 !important}
+  .node.hot rect{stroke:#fff}
+
+  /* floating panels */
+  .float{position:absolute;background:var(--panel);border:1px solid var(--line);
+    border-radius:11px;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  #detail{top:14px;right:14px;width:312px;max-height:calc(100% - 28px);overflow:auto;
+    padding:14px;display:none;z-index:5}
+  #detail.on{display:block}
+  #detail h3{margin:0 0 2px;font-size:14px}
+  #detail .meta{color:var(--mut);font-size:11px;margin-bottom:10px}
+  #detail .row{display:flex;justify-content:space-between;gap:10px;padding:3px 0;
+    border-top:1px solid var(--line)}
+  #detail .row .v{color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  #detail .grp{margin-top:12px;font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut)}
+  #detail .swatch{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:7px;vertical-align:middle}
+  #detail .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #detail button.close{all:unset;cursor:pointer;float:right;color:var(--mut);font-size:16px;line-height:1}
+  #legend{left:14px;bottom:14px;padding:11px 13px;max-width:230px;z-index:4}
+  #legend .lg{display:flex;align-items:center;gap:8px;padding:2.5px 0;cursor:pointer;font-size:12px}
+  #legend .lg .dot{width:11px;height:11px;border-radius:50%;flex:0 0 auto}
+  #legend .lg.off{opacity:.32}
+  #legend .lg .n{margin-left:auto;color:var(--mut);font-variant-numeric:tabular-nums;font-size:11px}
+  #legend .hd{font-size:10.5px;text-transform:uppercase;letter-spacing:.6px;color:var(--mut);margin-bottom:6px}
+  .hint{position:absolute;left:14px;top:14px;color:var(--dim);font-size:11px;z-index:3;
+    background:rgba(14,17,22,.7);padding:6px 10px;border-radius:7px;border:1px solid var(--line)}
+  .ctrls{position:absolute;right:14px;bottom:14px;display:flex;gap:6px;z-index:4}
+  .ctrls button{all:unset;cursor:pointer;background:var(--panel);border:1px solid var(--line);
+    width:30px;height:30px;border-radius:8px;text-align:center;color:var(--ink);font-size:15px}
+  .ctrls button:hover{border-color:var(--acc)}
+  #tip{position:absolute;pointer-events:none;background:#000d;border:1px solid var(--line);
+    border-radius:7px;padding:6px 9px;font-size:11.5px;z-index:9;display:none;max-width:220px;line-height:1.35}
+  #tip .h{font-weight:650;margin-bottom:2px}
+  #tip .m{color:var(--mut)}
+  .legR{display:flex;gap:14px;align-items:center}
+  .legR .k{display:flex;align-items:center;gap:6px;color:var(--mut);font-size:11px}
+  .legR .k i{width:10px;height:10px;border-radius:3px;display:inline-block}
+  .mapmodes{position:absolute;left:14px;top:14px;display:flex;gap:4px;
+    background:var(--panel2);padding:3px;border-radius:9px;z-index:6}
+  .mapmodes button{all:unset;cursor:pointer;padding:5px 13px;border-radius:7px;
+    font-size:12px;font-weight:600;color:var(--mut)}
+  .mapmodes button.on{background:var(--acc);color:#06101f}
+  #detail .bar{height:5px;border-radius:3px;background:var(--acc);margin-top:3px}
+</style>
+
+<div id="app">
+  <header>
+    <h1>⚙ Factory&nbsp;Plan&nbsp;·&nbsp;<span class="t" id="hTargets"></span></h1>
+    <div class="stats" id="hStats"></div>
+    <div class="legR" id="flowLeg" style="display:none">
+      <span class="k"><i style="background:var(--raw)"></i>raw</span>
+      <span class="k"><i style="background:var(--inter)"></i>part</span>
+      <span class="k"><i style="background:var(--fluid)"></i>fluid</span>
+      <span class="k"><i style="background:var(--target)"></i>target</span>
+    </div>
+    <div class="tabs">
+      <button id="tabFlow" class="on">Production flow</button>
+      <button id="tabMap">Resource map</button>
+    </div>
+  </header>
+  <main>
+    <section id="flowView" class="view on">
+      <svg id="flowSvg"></svg>
+      <div class="hint">Scroll to zoom · drag to pan · hover a node to trace flows · click to inspect</div>
+    </section>
+    <section id="mapView" class="view">
+      <canvas id="mapCanvas"></canvas>
+      <div class="mapmodes" id="mapModes" style="display:none"></div>
+      <div class="float" id="legend"></div>
+      <div class="ctrls">
+        <button id="mapReset" title="Fit">⤢</button>
+        <button id="mapIn">+</button>
+        <button id="mapOut">−</button>
+      </div>
+    </section>
+    <div class="float" id="detail"></div>
+    <div id="tip"></div>
+  </main>
+</div>
+
+<script>
+/*__DATA__*/
+
+// ---------- palette ----------------------------------------------------- //
+const RES_COLOR = {
+  Desc_OreIron_C:"#c98a6b", Desc_OreCopper_C:"#e0813f", Desc_Stone_C:"#cdbfa3",
+  Desc_Coal_C:"#6b7079", Desc_OreGold_C:"#f2c14e", Desc_RawQuartz_C:"#e7a8d6",
+  Desc_Sulfur_C:"#e6d24a", Desc_LiquidOil_C:"#9b8cff", Desc_OreBauxite_C:"#c47a55",
+  Desc_OreUranium_C:"#6fe06f", Desc_NitrogenGas_C:"#7fb0e0", Desc_Water_C:"#4a90d9",
+  Desc_SAM_C:"#b06fe0",
+};
+const MACH_COLOR = {
+  Build_SmelterMk1_C:"#c2683e", Build_FoundryMk1_C:"#c2683e",
+  Build_ConstructorMk1_C:"#3f7fbf", Build_AssemblerMk1_C:"#4f6fd0",
+  Build_ManufacturerMk1_C:"#6d54c8", Build_OilRefinery_C:"#c9913e",
+  Build_Packager_C:"#5a8a4a", Build_Blender_C:"#2b9b8e",
+  Build_HadronCollider_C:"#a94bbf", Build_Converter_C:"#a94bbf",
+  Build_QuantumEncoder_C:"#a94bbf",
+};
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+function itemColor(it){ return it.target?css('--target'):it.raw?css('--raw'):it.fluid?css('--fluid'):css('--inter'); }
+function fmt(n){
+  if(n==null) return "0";
+  if(n>=1e8) return "∞";
+  const a=Math.abs(n);
+  if(a>=1e4) return (n/1e3).toFixed(1)+"k";
+  if(a>=100) return n.toFixed(0);
+  if(a>=10) return n.toFixed(1);
+  return n.toFixed(2);
+}
+
+// ---------- header ------------------------------------------------------ //
+document.getElementById('hTargets').textContent = (DATA.meta.targets||[]).join(' + ');
+const pc=DATA.meta.power_consumed_mw, pg=DATA.meta.power_generated_mw;
+const stat=(b,s)=>`<div class="stat"><b>${b}</b><span>${s}</span></div>`;
+document.getElementById('hStats').innerHTML =
+  stat(fmt(DATA.meta.scale)+"/min","throughput")+
+  stat(DATA.meta.recipe_count,"recipes")+
+  stat(Math.ceil(DATA.meta.machines_total),"machines")+
+  stat(fmt(pc)+" MW","power draw")+
+  (pg>0?stat(fmt(pg)+" MW","nuclear gen"):"")+
+  (DATA.map?stat(fmt(DATA.map.sites.length),"mining sites"):"");
+
+// ---------- shared state ------------------------------------------------ //
+let highlightRes = null;             // resource className linked across views
+const tip = document.getElementById('tip');
+function showTip(x,y,html){ tip.innerHTML=html; tip.style.display='block';
+  tip.style.left=(x+14)+'px'; tip.style.top=(y+14)+'px'; }
+function hideTip(){ tip.style.display='none'; }
+
+// ======================================================================= //
+//  PRODUCTION FLOW  (layered SVG graph)                                    //
+// ======================================================================= //
+const SVGNS="http://www.w3.org/2000/svg";
+const flow = (()=>{
+  const svg=document.getElementById('flowSvg');
+  const root=document.createElementNS(SVGNS,'g'); svg.appendChild(root);
+  const linkG=document.createElementNS(SVGNS,'g'); root.appendChild(linkG);
+  const nodeG=document.createElementNS(SVGNS,'g'); root.appendChild(nodeG);
+
+  const RW=176, RH=34, IW=150, IH=24, COLGAP=86, VGAP=12;
+  const nodes=[], byId={}, adj={};
+  DATA.items.forEach(it=>{ const n={id:it.id,kind:'item',d:it,layer:it.layer,
+    w:IW,h:IH,name:it.name}; nodes.push(n); byId[n.id]=n; adj[n.id]=[]; });
+  DATA.recipes.forEach(r=>{ const n={id:r.id,kind:'recipe',d:r,layer:r.layer,
+    w:RW,h:RH,name:r.name}; nodes.push(n); byId[n.id]=n; adj[n.id]=[]; });
+
+  const flows=DATA.flows;
+  flows.forEach(f=>{ if(byId[f.src]&&byId[f.dst]){ adj[f.src].push(f.dst); adj[f.dst].push(f.src);} });
+  const maxRate=Math.max(1,...flows.filter(f=>f.rate<1e8).map(f=>f.rate));
+  const linkW=r=> 1.2 + Math.sqrt(Math.min(r,maxRate)/maxRate)*12;
+
+  // --- layout: columns by layer, barycenter ordering ---
+  const cols={};
+  nodes.forEach(n=>{ (cols[n.layer]=cols[n.layer]||[]).push(n); });
+  const layers=Object.keys(cols).map(Number).sort((a,b)=>a-b);
+  layers.forEach(L=>cols[L].forEach((n,i)=>n.ord=i));
+  const neigh=(n,L)=> adj[n.id].map(id=>byId[id]).filter(m=>m&&m.layer===L);
+  for(let pass=0;pass<6;pass++){
+    const dir = pass%2? -1:1;
+    const seq = dir>0? layers.slice(1) : layers.slice(0,-1).reverse();
+    seq.forEach(L=>{
+      const ref=L-dir;
+      cols[L].forEach(n=>{ const ns=neigh(n,ref);
+        n.bc = ns.length? ns.reduce((s,m)=>s+m.ord,0)/ns.length : n.ord; });
+      cols[L].sort((a,b)=>a.bc-b.bc);
+      cols[L].forEach((n,i)=>n.ord=i);
+    });
+  }
+  // positions
+  let x=0; const colX={};
+  layers.forEach(L=>{ colX[L]=x; const wmax=Math.max(...cols[L].map(n=>n.w));
+    x += wmax + COLGAP; });
+  let maxH=0;
+  layers.forEach(L=>{ let y=0; cols[L].forEach(n=>{ n.y=y; y+=n.h+VGAP; });
+    const h=y-VGAP; cols[L].h=h; maxH=Math.max(maxH,h); });
+  layers.forEach(L=>{ const off=(maxH-cols[L].h)/2;
+    cols[L].forEach(n=>{ n.x=colX[L]; n.y+=off; }); });
+  const fullW=x-COLGAP, fullH=maxH;
+
+  // --- draw links ---
+  const linkEls=[];
+  flows.forEach(f=>{ const s=byId[f.src], d=byId[f.dst]; if(!s||!d) return;
+    const x1=s.x+s.w, y1=s.y+s.h/2, x2=d.x, y2=d.y+d.h/2;
+    const mx=(x1+x2)/2;
+    const p=document.createElementNS(SVGNS,'path');
+    p.setAttribute('d',`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
+    p.setAttribute('class','link');
+    const itemNode = s.kind==='item'?s.d:d.d;
+    p.setAttribute('stroke',itemColor(itemNode));
+    p.setAttribute('stroke-width',linkW(f.rate));
+    p.setAttribute('opacity',.28);
+    p.__f=f; linkG.appendChild(p); linkEls.push(p);
+  });
+
+  // --- draw nodes ---
+  nodes.forEach(n=>{
+    const g=document.createElementNS(SVGNS,'g'); g.setAttribute('class','node');
+    g.setAttribute('transform',`translate(${n.x},${n.y})`); n.__g=g;
+    const rect=document.createElementNS(SVGNS,'rect');
+    rect.setAttribute('width',n.w); rect.setAttribute('height',n.h);
+    rect.setAttribute('rx',n.kind==='recipe'?7:11);
+    if(n.kind==='item'){
+      rect.setAttribute('fill','#11161d');
+      rect.setAttribute('stroke',itemColor(n.d));
+    }else{
+      const c=MACH_COLOR[n.d.machine_key]||'#475063';
+      rect.setAttribute('fill',c+'22'); rect.setAttribute('stroke',c);
+    }
+    g.appendChild(rect);
+    if(n.kind==='item'){
+      const t=document.createElementNS(SVGNS,'text');
+      t.setAttribute('x',10); t.setAttribute('y',n.h/2); t.textContent=trim(n.name,20);
+      g.appendChild(t);
+    }else{
+      const t=document.createElementNS(SVGNS,'text');
+      t.setAttribute('x',10); t.setAttribute('y',12); t.textContent=trim(n.name,22);
+      g.appendChild(t);
+      const s=document.createElementNS(SVGNS,'text'); s.setAttribute('class','sub');
+      s.setAttribute('x',10); s.setAttribute('y',24);
+      s.textContent=`${n.d.count.toFixed(1)}× ${trim(n.d.machine,14)}`;
+      g.appendChild(s);
+    }
+    g.addEventListener('mouseenter',e=>hover(n,e));
+    g.addEventListener('mousemove',e=>moveTipNode(n,e));
+    g.addEventListener('mouseleave',()=>{ if(!pinned){clearHot();} hideTip(); });
+    g.addEventListener('click',e=>{ e.stopPropagation(); pin(n); });
+    nodeG.appendChild(g);
+  });
+
+  function trim(s,n){ return s.length>n? s.slice(0,n-1)+'…':s; }
+
+  // --- highlight ---
+  let pinned=null;
+  function incident(n){ return linkEls.filter(p=>p.__f.src===n.id||p.__f.dst===n.id); }
+  function hover(n){
+    svg.classList.add('faded');
+    const ls=incident(n); const ids=new Set([n.id]);
+    ls.forEach(p=>{ p.classList.add('hot'); ids.add(p.__f.src); ids.add(p.__f.dst); });
+    ids.forEach(id=>byId[id].__g.classList.add('hot'));
+  }
+  function clearHot(){ svg.classList.remove('faded');
+    linkEls.forEach(p=>p.classList.remove('hot'));
+    nodes.forEach(n=>n.__g.classList.remove('hot')); }
+  function moveTipNode(n,e){
+    if(n.kind==='item'){
+      const d=n.d;
+      let extra = d.raw? `<div class="m">raw resource${d.extraction?` · extract ${fmt(d.extraction)}/min`:''}</div>`
+                : d.target? `<div class="m">shipped target · ${fmt(d.shipped)}/min</div>`
+                : `<div class="m">${d.fluid?'fluid':'part'}${d.sink_points?` · ${d.sink_points} pts`:''}</div>`;
+      showTip(e.clientX,e.clientY,`<div class="h">${d.name}</div>${extra}`);
+    }else{
+      const d=n.d;
+      showTip(e.clientX,e.clientY,`<div class="h">${d.name}${d.alt?' <span class="m">[alt]</span>':''}</div>`+
+        `<div class="m">${d.count.toFixed(2)}× ${d.machine} · ${fmt(d.power_total)} MW · @${d.stage}</div>`);
+    }
+  }
+  function pin(n){
+    pinned=n; clearHot(); hover(n);
+    if(n.kind==='item') setHighlightRes(n.d.raw?n.d.cls:null);
+    detailFor(n);
+  }
+  svg.addEventListener('click',()=>{ pinned=null; clearHot(); closeDetail(); setHighlightRes(null); });
+
+  // --- zoom / pan ---
+  let tx=0,ty=0,sc=1;
+  function apply(){ root.setAttribute('transform',`translate(${tx},${ty}) scale(${sc})`); }
+  function fit(){
+    const r=svg.getBoundingClientRect(); const pad=40;
+    sc=Math.min((r.width-pad*2)/fullW,(r.height-pad*2)/fullH,1.4);
+    tx=(r.width-fullW*sc)/2; ty=(r.height-fullH*sc)/2; apply();
+  }
+  svg.addEventListener('wheel',e=>{ e.preventDefault();
+    const r=svg.getBoundingClientRect(); const mx=e.clientX-r.left,my=e.clientY-r.top;
+    const k=Math.exp(-e.deltaY*0.0012), ns=Math.max(.12,Math.min(4,sc*k));
+    tx=mx-(mx-tx)*(ns/sc); ty=my-(my-ty)*(ns/sc); sc=ns; apply();
+  },{passive:false});
+  let drag=null;
+  svg.addEventListener('mousedown',e=>{ drag={x:e.clientX,y:e.clientY,tx,ty}; svg.classList.add('drag'); });
+  window.addEventListener('mousemove',e=>{ if(!drag)return;
+    tx=drag.tx+(e.clientX-drag.x); ty=drag.ty+(e.clientY-drag.y); apply(); });
+  window.addEventListener('mouseup',()=>{ if(drag){drag=null;svg.classList.remove('drag');} });
+
+  // --- detail panel ---
+  const detail=document.getElementById('detail');
+  function row(color,label,val){ return `<div class="row"><span class="lbl"><span class="swatch" style="background:${color}"></span>${label}</span><span class="v">${val}</span></div>`; }
+  function detailFor(n){
+    let h=`<button class="close" onclick="window.__closeDetail()">×</button>`;
+    if(n.kind==='recipe'){
+      const d=n.d;
+      h+=`<h3>${d.name}${d.alt?' <span style="color:var(--mut);font-size:11px">[alt]</span>':''}</h3>`;
+      h+=`<div class="meta">${d.count.toFixed(2)} × ${d.machine} · ${fmt(d.power_total)} MW · built @ ${d.stage}</div>`;
+      h+=`<div class="grp">Inputs / min</div>`;
+      d.inputs.sort((a,b)=>b.rate-a.rate).forEach(x=>{ const it=byId['I:'+x.item].d;
+        h+=row(itemColor(it),it.name,fmt(x.rate)); });
+      h+=`<div class="grp">Outputs / min</div>`;
+      d.outputs.sort((a,b)=>b.rate-a.rate).forEach(x=>{ const it=byId['I:'+x.item].d;
+        h+=row(itemColor(it),it.name,fmt(x.rate)); });
+    }else{
+      const d=n.d, col=itemColor(d);
+      h+=`<h3>${d.name}</h3>`;
+      h+=`<div class="meta">${d.raw?'raw resource':d.target?'shipped target':d.fluid?'fluid':'part'}`+
+         `${d.sink_points?` · ${d.sink_points} sink pts`:''}</div>`;
+      const prod=flows.filter(f=>f.dst===n.id), cons=flows.filter(f=>f.src===n.id);
+      if(d.raw && d.extraction) h+=row(col,'extracted',fmt(d.extraction)+' /min');
+      if(d.shipped) h+=row(col,'shipped',fmt(d.shipped)+' /min');
+      if(prod.length){ h+=`<div class="grp">Produced by</div>`;
+        prod.sort((a,b)=>b.rate-a.rate).forEach(f=>{ const r=byId[f.src].d;
+          h+=row(MACH_COLOR[r.machine_key]||'#475063',r.name,fmt(f.rate)); }); }
+      if(cons.length){ h+=`<div class="grp">Consumed by</div>`;
+        cons.sort((a,b)=>b.rate-a.rate).forEach(f=>{ const r=byId[f.dst].d;
+          h+=row(MACH_COLOR[r.machine_key]||'#475063',r.name,fmt(f.rate)); }); }
+      if(d.raw) h+=`<div class="grp" style="margin-top:14px;color:var(--acc);cursor:pointer" onclick="window.__showOnMap('${d.cls}')">▸ show source nodes on map</div>`;
+    }
+    detail.innerHTML=h; detail.classList.add('on');
+  }
+  function closeDetail(){ detail.classList.remove('on'); }
+  window.__closeDetail=()=>{ closeDetail(); pinned=null; clearHot(); setHighlightRes(null); };
+
+  document.getElementById('tabFlow').addEventListener('click',()=>{ if(!sc||sc===1) fit(); });
+  return { fit, byId, focusRes:(cls)=>{ const n=byId['I:'+cls]; if(n){pin(n);} } };
+})();
+window.addEventListener('load',()=>flow.fit());
+document.getElementById('flowLeg').style.display='flex';
+
+function setHighlightRes(cls){ highlightRes=cls; if(window.__map) window.__map.redraw(); }
+
+// ======================================================================= //
+//  RESOURCE MAP  (canvas over real terrain)                                //
+// ======================================================================= //
+if(DATA.map){
+  const M=DATA.map, B=M.bounds;
+  const cv=document.getElementById('mapCanvas'), ctx=cv.getContext('2d');
+  const bg=new Image(); bg.src='map_bg.jpg'; let bgok=false;
+  bg.onload=()=>{ bgok=true; redraw(); };
+
+  // world(game units) -> base image px (0..imgW)
+  const wx = x => (x-B.west)/(B.east-B.west)*B.imgW;
+  const wy = y => (y-B.north)/(B.south-B.north)*B.imgH;
+
+  let view={s:1,tx:0,ty:0};     // base-image px -> screen
+  function fit(){ const r=cv.getBoundingClientRect();
+    const s=Math.min(r.width/B.imgW,r.height/B.imgH);
+    view.s=s; view.tx=(r.width-B.imgW*s)/2; view.ty=(r.height-B.imgH*s)/2; redraw(); }
+  const sx = ix => ix*view.s+view.tx;
+  const sy = iy => iy*view.s+view.ty;
+
+  function resize(){ const r=cv.getBoundingClientRect(), dpr=devicePixelRatio||1;
+    cv.width=r.width*dpr; cv.height=r.height*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+
+  // legend (per-resource totals among USED sites)
+  const totals={};
+  M.sites.forEach(s=>{ totals[s.res]=totals[s.res]||{name:s.res_name,rate:0,n:0};
+    totals[s.res].rate+=s.rate; totals[s.res].n+=s.n; });
+  const offRes=new Set();
+  const leg=document.getElementById('legend');
+  function buildMiningLegend(){
+    let lh=`<div class="hd">Mining sites · /min</div>`;
+    Object.entries(totals).sort((a,b)=>b[1].rate-a[1].rate).forEach(([cls,t])=>{
+      lh+=`<div class="lg" data-res="${cls}"><span class="dot" style="background:${RES_COLOR[cls]||'#888'}"></span>`+
+          `<span>${t.name}</span><span class="n">${fmt(t.rate)} · ${t.n}n</span></div>`; });
+    leg.innerHTML=lh;
+    leg.querySelectorAll('.lg').forEach(el=>{ const cls=el.dataset.res;
+      el.addEventListener('click',()=>{ if(offRes.has(cls)){offRes.delete(cls);el.classList.remove('off');}
+        else{offRes.add(cls);el.classList.add('off');} redraw(); });
+      el.addEventListener('mouseenter',()=>{ setHighlightRes(cls); });
+      el.addEventListener('mouseleave',()=>{ setHighlightRes(null); });
+    });
+  }
+  function buildFactoryLegend(){
+    const facs=SP.regions.filter(r=>r.machines>=0.5).length;
+    leg.innerHTML =
+      `<div class="hd">Factories · production</div>`+
+      `<div class="lg"><span>${facs} factories · ${Math.ceil(SP.totMach)} machines</span></div>`+
+      `<div class="hd" style="margin-top:9px">read</div>`+
+      `<div class="lg"><span class="dot" style="background:#5a8f6b"></span><span>● factory (size = machines)</span></div>`+
+      `<div class="lg"><span class="dot" style="background:var(--raw);border-radius:2px"></span><span>◆ local mine (faint context)</span></div>`+
+      `<div class="hd" style="margin-top:9px">click a factory: trace sourcing</div>`+
+      `<div class="lg"><span class="dot" style="background:var(--good)"></span><span>where its inputs come from</span></div>`+
+      `<div class="lg"><span class="dot" style="background:var(--warn)"></span><span>where its outputs go</span></div>`;
+  }
+  function buildTransportLegend(){
+    const sav = SP.single_hub_cost>0? Math.round(100*(1-SP.transport_cost/SP.single_hub_cost)) : null;
+    const n = LOGI? LOGI.hubs.length : 0, ln = LOGI? LOGI.links.length : 0;
+    leg.innerHTML =
+      `<div class="hd">Transport · logistics</div>`+
+      `<div class="lg"><span>${n} logistics hubs · ${ln} train lines</span></div>`+
+      (sav!=null? `<div class="lg"><span>transport −${sav}% vs single hub</span></div>`:'')+
+      `<div class="hd" style="margin-top:9px">read</div>`+
+      `<div class="lg"><span class="dot" style="background:#6ea8d8"></span><span>● hub (size = cargo/min)</span></div>`+
+      `<div class="lg"><span class="dot" style="background:var(--warn)"></span><span>◎ relay hub (mostly transit)</span></div>`+
+      `<div class="lg"><span class="dot" style="background:#9aa4b2"></span><span>line = train (width = items/min)</span></div>`+
+      `<div class="lg"><span class="dot" style="background:var(--fluid)"></span><span>fluid pipeline</span></div>`+
+      `<div class="hd" style="margin-top:9px">slider sets hub density · click to isolate</div>`;
+  }
+  function buildLegend(){
+    if(!SP || mapMode==='mining') return buildMiningLegend();
+    if(mapMode==='transport') return buildTransportLegend();
+    return buildFactoryLegend();
+  }
+
+  function pt(o){ return {x:sx(wx(o.x)), y:sy(wy(o.y))}; }
+  const maxSite=Math.max(1,...M.sites.map(s=>s.rate));
+
+  // ---- spatial overlay (drives the Factories & Transport layers) --------- //
+  // Three map LAYERS share this data:
+  //   factory   -> production sites (fine regions), per-input sourcing
+  //   mining    -> on-site raw extraction (fine regions)
+  //   transport -> logistics network: fine regions GRID-CLUSTERED into a tunable
+  //                number of logistics hubs, with trains aggregated between them.
+  const SP=DATA.spatial;
+  let mapMode = SP? 'factory' : 'mining';
+  let selReg  = null;                      // selected production region (factory mode)
+  let selLogi = null;                      // selected logistics hub (transport mode)
+  let logiCell = 120000;                   // logistics grid cell (game units); see below
+  let LOGI = null;                         // built lazily by buildLogistics()
+  const regById={};
+  if(SP){ SP.regions.forEach(rg=>regById[rg.id]=rg);
+    SP.maxMach=Math.max(1,...SP.regions.map(rg=>rg.machines));
+    SP.totMach=SP.regions.reduce((s,rg)=>s+rg.machines,0);
+    // aggregate per-item shipments into ONE directed link per region pair (a->b)
+    const lk={};
+    SP.shipments.forEach(s=>{ const k=s.src+'>'+s.dst;
+      const l=lk[k]||(lk[k]={a:s.src,b:s.dst,rate:0,items:[],allFluid:true});
+      l.rate+=s.rate; l.items.push({item:s.item_name,rate:s.rate,fluid:s.fluid});
+      if(!s.fluid) l.allFluid=false; });
+    SP.links=Object.values(lk);
+    SP.links.forEach(l=>l.items.sort((a,b)=>b.rate-a.rate));   // heaviest cargo first
+    SP.maxLink=Math.max(1,...SP.links.map(l=>l.rate));
+    // per-region total mined (for the Mining layer)
+    SP.maxMined=Math.max(1,...SP.regions.map(rg=>
+      Object.values(rg.mined||{}).reduce((s,v)=>s+v,0)));
+    // accurate per-region cargo handled = Σ rate of every train touching it
+    // (net imports+exports MISS pass-through; incident-link sum counts it once
+    // per leg, which is what a station actually moves). Used to size hubs.
+    SP.regions.forEach(rg=>{ rg._tput=0;
+      rg._transitVol=Object.values(rg.transit||{}).reduce((s,v)=>s+v,0); });
+    SP.links.forEach(l=>{ if(regById[l.a]) regById[l.a]._tput+=l.rate;
+                          if(regById[l.b]) regById[l.b]._tput+=l.rate; });
+    // per-(region,item) shipment indices + link lookup, for commodity tracing
+    SP.byDstItem={}; SP.bySrcItem={}; SP.linkIdx={};
+    SP.links.forEach((l,i)=> SP.linkIdx[l.a+'>'+l.b]=i);
+    SP.shipments.forEach(s=>{ (SP.byDstItem[s.dst+'|'+s.item_name]=SP.byDstItem[s.dst+'|'+s.item_name]||[]).push(s);
+                              (SP.bySrcItem[s.src+'|'+s.item_name]=SP.bySrcItem[s.src+'|'+s.item_name]||[]).push(s); });
+    // Data-driven default density: pick a grid cell that yields ~12 logistics
+    // hubs over the area the regions actually span. This is the "reasonable
+    // number" — coarse enough to collapse stations into train depots, fine
+    // enough that distinct basins stay separate. The slider tunes it live.
+    if(SP.regions.length){
+      const xs=SP.regions.map(r=>r.x), ys=SP.regions.map(r=>r.y);
+      const w=Math.max(...xs)-Math.min(...xs), h=Math.max(...ys)-Math.min(...ys);
+      const area=Math.max(1, w*h);
+      logiCell=Math.min(360000, Math.max(60000,
+        Math.round(Math.sqrt(area/12)/10000)*10000));
+    }
+  }
+  const makes=(rg,it)=> rg && ((rg.produces&&it in rg.produces) || (rg.mined&&it in rg.mined));
+  // Commodity trace, ONE level: for the selected hub, follow each input item back
+  // through transit hubs to the hub that actually PRODUCES it, and stop. Likewise
+  // each output forward to the hub that CONSUMES it. Click that hub to go deeper.
+  // (We deliberately do NOT recurse into a producer's own bill-of-materials — that
+  //  closure pulls in nearly the whole grid via shared low-level parts.)
+  let traceUp=new Set(), traceDown=new Set(), traceNodes=new Set();
+  function computeTrace(){
+    traceUp=new Set(); traceDown=new Set(); traceNodes=new Set();
+    if(selReg==null || !SP) return;
+    traceNodes.add(selReg);
+    const sel=regById[selReg];
+    // UPSTREAM: each consumed input back to its producing hub (through transit)
+    let q=Object.keys(sel.imported||{}).map(it=>[selReg,it]); let seen=new Set();
+    while(q.length){ const [hub,it]=q.shift(); const k=hub+'|'+it; if(seen.has(k))continue; seen.add(k);
+      (SP.byDstItem[hub+'|'+it]||[]).forEach(s=>{ const li=SP.linkIdx[s.src+'>'+s.dst];
+        if(li!=null) traceUp.add(li); traceNodes.add(s.src);
+        if(!makes(regById[s.src],it)) q.push([s.src,it]);   // transit: keep following the item back
+      });                                                    // producer reached: stop
+    }
+    // DOWNSTREAM: each produced/mined output forward to the hub that consumes it
+    q=[]; Object.keys(sel.produces||{}).forEach(it=>q.push([selReg,it]));
+    Object.keys(sel.mined||{}).forEach(it=>q.push([selReg,it])); seen=new Set();
+    while(q.length){ const [hub,it]=q.shift(); const k=hub+'|'+it; if(seen.has(k))continue; seen.add(k);
+      (SP.bySrcItem[hub+'|'+it]||[]).forEach(s=>{ const li=SP.linkIdx[s.src+'>'+s.dst];
+        if(li!=null) traceDown.add(li); traceNodes.add(s.dst); const dst=regById[s.dst];
+        if(!(dst && dst.imported && it in dst.imported)) q.push([s.dst,it]);  // transit forward
+      });                                                                      // consumer reached: stop
+    }
+  }
+  const isMine=rg=> rg.machines<0.5;          // pure-mining outpost (no factory)
+  const regColor=rg=> isMine(rg)
+      ? (RES_COLOR[Object.keys(rg.mined_by_cls||{})[0]]||'#9a8') : (MACH_COLOR[rg.machine_key]||'#5a8f6b');
+  const regRad=rg=> isMine(rg)
+      ? 3+Math.sqrt((rg.mined_total||0)/SP.maxMined)*15 : 6+Math.sqrt(rg.machines/SP.maxMach)*22;
+  const clip=(s,n)=> s.length>n? s.slice(0,n-1)+'…':s;
+  function arrow(pa,pb,stop){           // line pa->pb, arrowhead near pb (offset `stop`)
+    const dx=pb.x-pa.x, dy=pb.y-pa.y, L=Math.hypot(dx,dy)||1, ux=dx/L, uy=dy/L;
+    const ex=pb.x-ux*stop, ey=pb.y-uy*stop;
+    ctx.beginPath(); ctx.moveTo(pa.x,pa.y); ctx.lineTo(ex,ey); ctx.stroke();
+    const h=5+ctx.lineWidth*1.1;
+    ctx.beginPath(); ctx.moveTo(ex,ey);
+    ctx.lineTo(ex-ux*h-uy*h*0.55, ey-uy*h+ux*h*0.55);
+    ctx.lineTo(ex-ux*h+uy*h*0.55, ey-uy*h-ux*h*0.55);
+    ctx.closePath(); ctx.fillStyle=ctx.strokeStyle; ctx.fill();
+  }
+  function segDist(px,py,ax,ay,bx,by){  // point-segment distance
+    const dx=bx-ax, dy=by-ay, L2=dx*dx+dy*dy;
+    let t=L2? ((px-ax)*dx+(py-ay)*dy)/L2 : 0; t=Math.max(0,Math.min(1,t));
+    return Math.hypot(px-(ax+dx*t), py-(ay+dy*t));
+  }
+  function convexHull(pts){             // Andrew monotone chain (world coords)
+    if(pts.length<3) return pts.slice();
+    const p=pts.slice().sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+    const X=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+    const lo=[]; for(const q of p){ while(lo.length>=2&&X(lo[lo.length-2],lo[lo.length-1],q)<=0)lo.pop(); lo.push(q);}
+    const up=[]; for(let i=p.length-1;i>=0;i--){const q=p[i]; while(up.length>=2&&X(up[up.length-2],up[up.length-1],q)<=0)up.pop(); up.push(q);}
+    lo.pop(); up.pop(); return lo.concat(up);
+  }
+
+  // --- Factories layer: sourcing ----------------------------------------- //
+  // Which hubs actually PRODUCE/MINE an item that `region` imports — follow the
+  // shipment back through any pure-transit hops until a real producer is hit.
+  function producersOf(region,item){
+    const out=new Set(), seen=new Set(); let q=[region];
+    while(q.length){ const h=q.shift(); if(seen.has(h))continue; seen.add(h);
+      (SP.byDstItem[h+'|'+item]||[]).forEach(s=>{
+        if(makes(regById[s.src],item)) out.add(s.src);   // real source: stop
+        else q.push(s.src);                              // transit: keep walking back
+      }); }
+    return out;
+  }
+
+  // --- Transport layer: logistics clustering ----------------------------- //
+  // Grid-bin the fine production regions into logistics hubs of cell size
+  // `logiCell`, drop intra-hub shipments (those become local belts), and
+  // aggregate the surviving trains between hubs. This is the decoupling: the
+  // logistics network is coarser than the production network and tunable.
+  function buildLogistics(){
+    const cell=logiCell, byKey={}, regToHub={};
+    SP.regions.forEach(rg=>{
+      const k=Math.floor(rg.x/cell)+'_'+Math.floor(rg.y/cell);
+      (byKey[k]=byKey[k]||[]).push(rg);
+    });
+    const hubs=[];
+    Object.values(byKey).forEach((members,i)=>{
+      let wx=0,wy=0,wt=0,mach=0,mined=0;
+      members.forEach(rg=>{ const w=(rg._tput||0)+1;
+        wx+=rg.x*w; wy+=rg.y*w; wt+=w; mach+=rg.machines||0;
+        mined+=Object.values(rg.mined||{}).reduce((s,v)=>s+v,0); });
+      members.forEach(rg=>regToHub[rg.id]=i);
+      // dominant member label = biggest factory, else biggest mine
+      const lead=members.slice().sort((a,b)=>(b.machines||0)-(a.machines||0))[0];
+      hubs.push({id:i, x:wx/wt, y:wy/wt, members:members.map(r=>r.id),
+        memberRegs:members, machines:mach, minedTot:mined, label:lead?lead.label_name:'',
+        tput:0, transitVol:0, _in:{}, _out:{}});
+    });
+    // aggregate shipments between distinct hubs (intra-hub = local belt -> drop)
+    const lk={};
+    SP.shipments.forEach(s=>{ const a=regToHub[s.src], b=regToHub[s.dst];
+      if(a==null||b==null||a===b) return;
+      const key=a+'>'+b, l=lk[key]||(lk[key]={a,b,rate:0,items:{},allFluid:true});
+      l.rate+=s.rate; l.items[s.item_name]=(l.items[s.item_name]||0)+s.rate;
+      if(!s.fluid) l.allFluid=false;
+      hubs[b]._in[s.item_name]=(hubs[b]._in[s.item_name]||0)+s.rate;
+      hubs[a]._out[s.item_name]=(hubs[a]._out[s.item_name]||0)+s.rate;
+    });
+    const links=Object.values(lk).map(l=>({a:l.a,b:l.b,rate:l.rate,allFluid:l.allFluid,
+      items:Object.entries(l.items).map(([item,rate])=>({item,rate})).sort((x,y)=>y.rate-x.rate)}));
+    links.forEach(l=>{ hubs[l.a].tput+=l.rate; hubs[l.b].tput+=l.rate; });
+    // transit volume per hub = items that both arrive AND leave (relay/pass-through)
+    hubs.forEach(h=>{ let t=0; for(const it in h._in)
+      t+=Math.min(h._in[it], h._out[it]||0); h.transitVol=t; });
+    LOGI={ hubs, links, regToHub, cell,
+           maxTput:Math.max(1,...hubs.map(h=>h.tput)),
+           maxLink:Math.max(1,...links.map(l=>l.rate)) };
+  }
+  const logiRad=h=> 4+Math.sqrt((h.tput||0)/(LOGI?LOGI.maxTput:1))*26;
+  const isRelay=h=> h.tput>0 && (2*h.transitVol/h.tput) > 0.35;
+
+  // --- shared cargo-label renderer (region links OR logistics links) ------ //
+  // rel: optional Set of item names to keep (filters big labels to only the
+  // resources relevant to the selected entity). traced: optional Set of link
+  // indices to restrict to. posOf(endpoint)->{x,y}.
+  function drawCargoLabels(links, posOf, selId, rel, traced){
+    ctx.font='16px ui-sans-serif'; ctx.textAlign='left'; const LH=20;
+    links.forEach((l,idx)=>{
+      let show;
+      if(selId!=null){
+        if(traced && !traced.has(idx)) return;
+        const incident = l.a===selId || l.b===selId;
+        show = incident || view.s>1.5;
+      } else show = view.s>2.2;
+      if(!show) return;
+      let items=l.items; if(rel) items=items.filter(i=>rel.has(i.item));
+      if(!items.length) return;
+      const pa=posOf(l.a), pb=posOf(l.b);
+      const ux=pb.x-pa.x, uy=pb.y-pa.y, L=Math.hypot(ux,uy)||1;
+      const cx=pa.x+ux*0.4, cy=pa.y+uy*0.4;       // anchor 0.4 from src (pair lands 0.4/0.6)
+      const nx=-uy/L, ny=ux/L;                     // push to one side of the line
+      const lines=items.slice(0,8).map(i=>clip(i.item,18)+'  '+fmt(i.rate));
+      if(items.length>8) lines.push('+'+(items.length-8)+' more');
+      const w=Math.max(...lines.map(t=>ctx.measureText(t).width));
+      const bh=lines.length*LH+4;
+      const lx=cx+nx*(bh/2+4), ly=cy+ny*(bh/2+4);
+      const x0=lx-w/2-4, y0=ly-bh/2;
+      ctx.globalAlpha=.85; ctx.fillStyle='#0b0e13'; ctx.fillRect(x0,y0,w+8,bh);
+      ctx.fillStyle=l.allFluid?css('--fluid'):'#cfd6df'; ctx.globalAlpha=1;
+      lines.forEach((t,i)=>ctx.fillText(t, x0+4, y0+16+i*LH));
+    });
+    ctx.globalAlpha=1;
+  }
+
+  // ===================== LAYER: Factories (production) ==================== //
+  function drawFactory(){
+    // faint resource nodes for context
+    ctx.globalAlpha=.16;
+    M.nodes.forEach(n=>{ const p=pt(n); ctx.fillStyle=RES_COLOR[n.res]||'#888';
+      ctx.beginPath(); ctx.arc(p.x,p.y,1.7,0,7); ctx.fill(); });
+    ctx.globalAlpha=1;
+    // only the selected factory's items matter — filters big labels down
+    let rel=null;
+    if(selReg!=null){ const rg=regById[selReg];
+      rel=new Set([...Object.keys(rg.imported||{}),...Object.keys(rg.exported||{})]); }
+    // selected factory territory hull
+    if(selReg!=null){ const rg=regById[selReg], fp=rg&&rg.footprint;
+      if(fp&&fp.length>=3){ const h=rg._hull||(rg._hull=convexHull(fp));
+        ctx.beginPath(); h.forEach((q,i)=>{ const p=pt({x:q[0],y:q[1]}); i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y); });
+        ctx.closePath(); ctx.fillStyle=regColor(rg); ctx.globalAlpha=.2; ctx.fill();
+        ctx.strokeStyle=regColor(rg); ctx.globalAlpha=.7; ctx.lineWidth=1; ctx.stroke(); ctx.globalAlpha=1; } }
+    // sourcing arrows: green = where its inputs come from, orange = where outputs go
+    SP.links.forEach((l,idx)=>{ const ra=regById[l.a], rb=regById[l.b]; if(!ra||!rb) return;
+      let col, alpha;
+      if(selReg!=null){ const up=traceUp.has(idx), down=traceDown.has(idx);
+        if(!up && !down) return;
+        col = up?css('--good'):css('--warn');
+        alpha = (l.a===selReg||l.b===selReg)? .95 : .5;
+      } else { col='#475063'; alpha=.1; }            // faint context when nothing selected
+      ctx.strokeStyle=col; ctx.globalAlpha=alpha;
+      ctx.lineWidth = 1+Math.sqrt(l.rate/SP.maxLink)*6;
+      arrow(pt(ra),pt(rb), regRad(rb)+2); });
+    ctx.globalAlpha=1;
+    // markers: factories = circles; local mines = faint diamonds (own layer for detail)
+    SP.regions.forEach(rg=>{ const p=pt(rg), rad=regRad(rg), sel=rg.id===selReg;
+      const inTrace = selReg==null || traceNodes.has(rg.id), mine=isMine(rg);
+      ctx.globalAlpha = mine? (inTrace?.5:.12) : (inTrace?1:.18);
+      ctx.fillStyle=regColor(rg);
+      ctx.lineWidth=sel?3:1.5; ctx.strokeStyle=sel?'#fff':'#0e1116';
+      if(mine){ ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(Math.PI/4);
+        ctx.fillRect(-rad,-rad,2*rad,2*rad); ctx.restore(); }
+      else { ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill(); ctx.stroke(); }
+      if(!mine && inTrace && (rad>11||sel)){ ctx.globalAlpha=1; ctx.textAlign='center';
+        ctx.fillStyle='#fff'; ctx.font='600 16px ui-sans-serif';
+        ctx.fillText(rg.label_name, p.x, p.y-rad-7);
+        ctx.fillStyle=css('--mut'); ctx.font='14px ui-sans-serif';
+        ctx.fillText(Math.ceil(rg.machines)+' mach', p.x, p.y+rad+17); } });
+    ctx.globalAlpha=1;
+    // cargo labels: only the selected factory's relevant items, on traced trains
+    if(selReg!=null)
+      drawCargoLabels(SP.links, i=>pt(regById[i]), selReg, rel,
+                      new Set([...traceUp,...traceDown]));
+  }
+
+  // ===================== LAYER: Transport (logistics) ===================== //
+  function drawTransport(){
+    if(!LOGI) buildLogistics();
+    // faint production regions for context (the network sits ABOVE production)
+    ctx.globalAlpha=.14;
+    SP.regions.forEach(rg=>{ const p=pt(rg); ctx.fillStyle=isMine(rg)?css('--raw'):'#5a8f6b';
+      ctx.beginPath(); ctx.arc(p.x,p.y,2,0,7); ctx.fill(); });
+    ctx.globalAlpha=1;
+    let rel=null;
+    if(selLogi!=null){ const h=LOGI.hubs[selLogi];
+      rel=new Set([...Object.keys(h._in||{}),...Object.keys(h._out||{})]); }
+    // all train lines; isolate the selected hub's trains
+    LOGI.links.forEach(l=>{ const ha=LOGI.hubs[l.a], hb=LOGI.hubs[l.b];
+      const incident = selLogi==null || l.a===selLogi || l.b===selLogi;
+      ctx.strokeStyle = l.allFluid?css('--fluid'):'#9aa4b2';
+      ctx.globalAlpha = selLogi==null? .4 : (incident?.95:.07);
+      ctx.lineWidth = 1+Math.sqrt(l.rate/LOGI.maxLink)*8;
+      arrow(pt(ha),pt(hb), logiRad(hb)+2); });
+    ctx.globalAlpha=1;
+    // hub markers sized by cargo handled; relay hubs (mostly transit) ringed
+    LOGI.hubs.forEach(h=>{ const p=pt(h), rad=logiRad(h), sel=h.id===selLogi;
+      const incident = selLogi==null || h.id===selLogi ||
+        LOGI.links.some(l=>(l.a===selLogi&&l.b===h.id)||(l.b===selLogi&&l.a===h.id));
+      ctx.globalAlpha = incident? 1 : .14;
+      ctx.fillStyle = isRelay(h)? css('--warn') : '#6ea8d8';
+      ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill();
+      ctx.lineWidth=sel?3:1.5; ctx.strokeStyle=sel?'#fff':'#0e1116'; ctx.stroke();
+      if(isRelay(h)){ ctx.beginPath(); ctx.arc(p.x,p.y,rad+3,0,7);
+        ctx.strokeStyle=css('--warn'); ctx.lineWidth=1.2;
+        ctx.globalAlpha=incident?.9:.14; ctx.stroke(); }
+      if(incident && (rad>9||sel)){ ctx.globalAlpha=1; ctx.textAlign='center';
+        ctx.fillStyle='#fff'; ctx.font='600 16px ui-sans-serif';
+        ctx.fillText(clip(h.label||('hub '+h.id),16), p.x, p.y-rad-7);
+        ctx.fillStyle=css('--mut'); ctx.font='14px ui-sans-serif';
+        ctx.fillText(fmt(h.tput)+'/min', p.x, p.y+rad+17); } });
+    ctx.globalAlpha=1;
+    drawCargoLabels(LOGI.links, i=>pt(LOGI.hubs[i]),
+                    selLogi, selLogi!=null?rel:null, null);
+  }
+
+  function redraw(){
+    const r=cv.getBoundingClientRect();
+    ctx.clearRect(0,0,r.width,r.height);
+    if(bgok){ ctx.globalAlpha=.62; ctx.imageSmoothingQuality='high';
+      ctx.drawImage(bg, view.tx,view.ty, B.imgW*view.s, B.imgH*view.s); ctx.globalAlpha=1; }
+    else { ctx.fillStyle='#0c1f33'; ctx.fillRect(view.tx,view.ty,B.imgW*view.s,B.imgH*view.s); }
+
+    if(mapMode==='factory' && SP){ drawFactory(); return; }
+    if(mapMode==='transport' && SP){ drawTransport(); return; }
+
+    const dim=cls=> offRes.has(cls) || (highlightRes && highlightRes!==cls);
+
+    // all resource nodes (faint context)
+    M.nodes.forEach(n=>{ if(offRes.has(n.res)) return;
+      const p=pt(n); const hot=highlightRes===n.res;
+      const base=n.used?1:.38; ctx.globalAlpha=highlightRes? (hot?1:.12) : base;
+      ctx.fillStyle=RES_COLOR[n.res]||'#888';
+      const rad=(n.kind==='well'?2.2:n.purity==='pure'?3.4:n.purity==='normal'?2.8:2.2);
+      ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill();
+      if(n.used){ ctx.globalAlpha=Math.min(1,ctx.globalAlpha+.2); ctx.lineWidth=1.1;
+        ctx.strokeStyle='#fff8'; ctx.stroke(); }
+    });
+    ctx.globalAlpha=1;
+
+    // Per-region mining (spatial model): one marker per hub showing what it mines
+    // on-site. Replaces the obsolete single-hub belt model.
+    if(SP){
+      SP.regions.forEach(rg=>{
+        const mc=rg.mined_by_cls||{}; const tot=rg.mined_total||0;
+        if(tot<=0.5) return;
+        const top=Object.entries(mc).sort((a,b)=>b[1]-a[1]);
+        const visible=top.filter(([cls])=>!offRes.has(cls));
+        if(!visible.length) return;
+        const dom=visible[0][0];
+        if(highlightRes && !visible.some(([cls])=>cls===highlightRes)) return;
+        const p=pt(rg); const rad=5+Math.sqrt(tot/SP.maxMined)*20;
+        ctx.globalAlpha = highlightRes? (visible.some(([c])=>c===highlightRes)?1:.15) : .9;
+        ctx.fillStyle=RES_COLOR[dom]||'#aaa';
+        ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill();
+        ctx.lineWidth=1.5; ctx.strokeStyle='#0e1116'; ctx.stroke();
+      });
+      ctx.globalAlpha=1;
+      return;
+    }
+
+    // (no spatial data) legacy single-hub view
+    const hub=pt(M.hub);
+    M.sites.forEach(s=>{ if(dim(s.res)) return; const p=pt(s);
+      ctx.strokeStyle=RES_COLOR[s.res]||'#aaa';
+      ctx.globalAlpha=highlightRes? .9:.5; ctx.lineWidth=1+Math.sqrt(s.rate/maxSite)*5;
+      ctx.beginPath(); ctx.moveTo(hub.x,hub.y); ctx.lineTo(p.x,p.y); ctx.stroke();
+    });
+    ctx.globalAlpha=1;
+    M.sites.forEach(s=>{ if(dim(s.res)) return; const p=pt(s);
+      const rad=4+Math.sqrt(s.rate/maxSite)*9;
+      ctx.fillStyle=RES_COLOR[s.res]||'#aaa'; ctx.beginPath(); ctx.arc(p.x,p.y,rad,0,7); ctx.fill();
+      ctx.lineWidth=1.5; ctx.strokeStyle='#0e1116'; ctx.stroke();
+    });
+    ctx.save(); ctx.translate(hub.x,hub.y); ctx.rotate(Math.PI/4);
+    ctx.fillStyle='#fff'; ctx.fillRect(-7,-7,14,14);
+    ctx.fillStyle='#58a6ff'; ctx.fillRect(-5,-5,10,10); ctx.restore();
+    ctx.fillStyle='#fff'; ctx.font='600 16px ui-sans-serif'; ctx.textAlign='center';
+    ctx.fillText('HUB', hub.x, hub.y-13);
+  }
+  window.__map={redraw};
+
+  // interaction: hover tooltip (hit test nearest site, then node)
+  cv.addEventListener('mousemove',e=>{ const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top;
+    if(mapMode==='factory' && SP){
+      let rb=null,rd=1e9;
+      SP.regions.forEach(rg=>{ const p=pt(rg), d=Math.hypot(p.x-mx,p.y-my);
+        if(d<=regRad(rg)+2 && d<rd){rd=d;rb=rg;} });
+      if(rb){ cv.style.cursor='pointer';
+        showTip(e.clientX,e.clientY,`<div class="h">${rb.label_name} ${isMine(rb)?'mine':'factory'}</div>`+
+          `<div class="m">${Math.ceil(rb.machines)} machines · ${fmt(rb.power)} MW · click to trace sourcing</div>`);
+        return;
+      }
+      // no factory under cursor -> hit-test the nearest sourcing arrow
+      let lb=null,ld=7;
+      SP.links.forEach((l,idx)=>{ if(selReg!=null && !traceUp.has(idx) && !traceDown.has(idx)) return;
+        const pa=pt(regById[l.a]), pb=pt(regById[l.b]);
+        const d=segDist(mx,my,pa.x,pa.y,pb.x,pb.y); if(d<ld){ld=d;lb=l;} });
+      if(lb){ cv.style.cursor='pointer';
+        const items=lb.items.slice(0,5).map(i=>
+          `<div class="m">${i.item}: ${fmt(i.rate)}/min</div>`).join('');
+        const more=lb.items.length>5?`<div class="m">+${lb.items.length-5} more…</div>`:'';
+        showTip(e.clientX,e.clientY,
+          `<div class="h">${regById[lb.a].label_name} → ${regById[lb.b].label_name}</div>`+
+          `<div class="m">${fmt(lb.rate)}/min over ${lb.items.length} item(s)</div>`+items+more);
+      } else { hideTip(); if(!pan) cv.style.cursor='grab'; }
+      return;
+    }
+    if(mapMode==='transport' && SP){
+      if(!LOGI) buildLogistics();
+      let hb=null,hd=1e9;
+      LOGI.hubs.forEach(h=>{ const p=pt(h), d=Math.hypot(p.x-mx,p.y-my);
+        if(d<=logiRad(h)+2 && d<hd){hd=d;hb=h;} });
+      if(hb){ cv.style.cursor='pointer';
+        showTip(e.clientX,e.clientY,
+          `<div class="h">${clip(hb.label||('hub '+hb.id),20)}${isRelay(hb)?' · relay':''}</div>`+
+          `<div class="m">${fmt(hb.tput)}/min on trains · ${hb.members.length} factories`+
+          `${hb.transitVol>0.5?` · ${fmt(hb.transitVol)}/min passing through`:''}</div>`);
+        return;
+      }
+      let lb=null,ld=7;
+      LOGI.links.forEach(l=>{ if(selLogi!=null && l.a!==selLogi && l.b!==selLogi) return;
+        const pa=pt(LOGI.hubs[l.a]), pb=pt(LOGI.hubs[l.b]);
+        const d=segDist(mx,my,pa.x,pa.y,pb.x,pb.y); if(d<ld){ld=d;lb=l;} });
+      if(lb){ cv.style.cursor='pointer';
+        const items=lb.items.slice(0,5).map(i=>
+          `<div class="m">${i.item}: ${fmt(i.rate)}/min</div>`).join('');
+        const more=lb.items.length>5?`<div class="m">+${lb.items.length-5} more…</div>`:'';
+        showTip(e.clientX,e.clientY,
+          `<div class="h">${clip(LOGI.hubs[lb.a].label,14)} → ${clip(LOGI.hubs[lb.b].label,14)}</div>`+
+          `<div class="m">train · ${fmt(lb.rate)}/min over ${lb.items.length} item(s)</div>`+items+more);
+      } else { hideTip(); if(!pan) cv.style.cursor='grab'; }
+      return;
+    }
+    if(SP){      // mining view: per-region on-site extraction
+      let rb=null,rd=1e9;
+      SP.regions.forEach(rg=>{ if((rg.mined_total||0)<=0.5) return;
+        const p=pt(rg), rad=5+Math.sqrt(rg.mined_total/SP.maxMined)*20;
+        const d=Math.hypot(p.x-mx,p.y-my); if(d<=rad+2 && d<rd){rd=d;rb=rg;} });
+      if(rb){ cv.style.cursor='pointer';
+        const rows=Object.entries(rb.mined).slice(0,6).map(([n,v])=>
+          `<div class="m">${n}: ${fmt(v)}/min</div>`).join('');
+        showTip(e.clientX,e.clientY,
+          `<div class="h">hub ${rb.id} · mines on-site</div>`+
+          `<div class="m">${fmt(rb.mined_total)}/min total</div>`+rows);
+      } else { hideTip(); if(!pan) cv.style.cursor='grab'; }
+      return;
+    }
+    let best=null,bd=14;
+    M.sites.forEach(s=>{ if(offRes.has(s.res))return; const p=pt(s);
+      const d=Math.hypot(p.x-mx,p.y-my); if(d<bd){bd=d;best={t:'site',o:s};} });
+    if(!best){ M.nodes.forEach(n=>{ if(offRes.has(n.res))return; const p=pt(n);
+      const d=Math.hypot(p.x-mx,p.y-my); if(d<6){bd=d;best={t:'node',o:n};} }); }
+    if(best){ cv.style.cursor='pointer';
+      const o=best.o;
+      if(best.t==='site') showTip(e.clientX,e.clientY,
+        `<div class="h">${o.res_name} site</div><div class="m">${fmt(o.rate)}/min · ${o.n} node${o.n>1?'s':''}</div>`);
+      else showTip(e.clientX,e.clientY,
+        `<div class="h">${o.res_name}</div><div class="m">${o.purity} ${o.kind} · ${fmt(o.rate)}/min${o.used?' · in use':''}</div>`);
+    } else { hideTip(); if(!pan) cv.style.cursor='grab'; }
+  });
+  cv.addEventListener('mouseleave',hideTip);
+
+  // zoom / pan
+  cv.addEventListener('wheel',e=>{ e.preventDefault(); const r=cv.getBoundingClientRect();
+    const mx=e.clientX-r.left,my=e.clientY-r.top; const k=Math.exp(-e.deltaY*0.0012);
+    const ns=Math.max(.2,Math.min(8,view.s*k));
+    view.tx=mx-(mx-view.tx)*(ns/view.s); view.ty=my-(my-view.ty)*(ns/view.s); view.s=ns; redraw();
+  },{passive:false});
+  let pan=null, downXY=null;
+  cv.addEventListener('mousedown',e=>{ pan={x:e.clientX,y:e.clientY,tx:view.tx,ty:view.ty};
+    downXY={x:e.clientX,y:e.clientY}; cv.classList.add('drag'); });
+  window.addEventListener('mousemove',e=>{ if(!pan)return;
+    view.tx=pan.tx+(e.clientX-pan.x); view.ty=pan.ty+(e.clientY-pan.y); redraw(); });
+  window.addEventListener('mouseup',()=>{ if(pan){pan=null;cv.classList.remove('drag');} });
+  document.getElementById('mapReset').addEventListener('click',fit);
+  const zoomBtn=(f)=>{ const r=cv.getBoundingClientRect(),mx=r.width/2,my=r.height/2;
+    const ns=Math.max(.2,Math.min(8,view.s*f));
+    view.tx=mx-(mx-view.tx)*(ns/view.s); view.ty=my-(my-view.ty)*(ns/view.s); view.s=ns; redraw(); };
+  document.getElementById('mapIn').addEventListener('click',()=>zoomBtn(1.3));
+  document.getElementById('mapOut').addEventListener('click',()=>zoomBtn(1/1.3));
+
+  // ---- region selection + breakdown panel (factory mode) ----------------- //
+  function rowKV(label,val,color){ return `<div class="row"><span class="lbl">`+
+    (color?`<span class="swatch" style="background:${color}"></span>`:'')+`${label}</span>`+
+    `<span class="v">${val}</span></div>`; }
+  // Factories layer: production breakdown + where each input is SOURCED from.
+  function regionDetail(rg){
+    const d=document.getElementById('detail');
+    let h=`<button class="close" onclick="window.__closeRegion()">×</button>`;
+    h+=`<h3>${rg.label_name} ${isMine(rg)?'mine':'factory'}</h3>`;
+    h+=`<div class="meta">${Math.ceil(rg.machines)} machines · ${fmt(rg.power)} MW · `+
+       `@ (${(rg.x/100).toFixed(0)}, ${(rg.y/100).toFixed(0)}) m</div>`;
+    const sec=(title,obj,color)=>{ const e=Object.entries(obj||{}); if(!e.length) return;
+      h+=`<div class="grp">${title}</div>`;
+      e.forEach(([k,v])=> h+=rowKV(k, fmt(v), color)); };
+    if(Object.keys(rg.by_machine||{}).length){
+      h+=`<div class="grp">Machines (size the site)</div>`;
+      Object.entries(rg.by_machine).forEach(([m,c])=> h+=rowKV(m, Math.ceil(c), regColor(rg))); }
+    sec('Mined on-site / min', rg.mined, css('--raw'));
+    // imported inputs WITH provenance — the "where stuff comes from" feature
+    const imp=Object.entries(rg.imported||{});
+    if(imp.length){ h+=`<div class="grp">Imported / min · sourced from</div>`;
+      imp.sort((a,b)=>b[1]-a[1]).forEach(([k,v])=>{
+        const srcs=[...producersOf(rg.id,k)].map(s=>{ const r=regById[s];
+          return (r&&isMine(r)?'⛏ ':'')+(r?r.label_name:('hub '+s)); });
+        const from = srcs.length? [...new Set(srcs)].join(', ') : 'upstream';
+        h+=`<div class="row"><span class="lbl"><span class="swatch" style="background:${css('--good')}"></span>${k}</span><span class="v">${fmt(v)}</span></div>`;
+        h+=`<div class="row" style="border:0;padding:0 0 2px"><span class="lbl" style="color:var(--mut);font-size:11px;padding-left:16px">← ${from}</span><span class="v"></span></div>`;
+      });
+    }
+    sec('Produced / min', rg.produces, css('--target'));
+    sec('Exported / min (shipped out)', rg.exported, css('--warn'));
+    d.innerHTML=h; d.classList.add('on');
+  }
+  // Transport layer: logistics-hub transit view + the factories it consolidates.
+  function logisticsDetail(hub){
+    const d=document.getElementById('detail');
+    let h=`<button class="close" onclick="window.__closeRegion()">×</button>`;
+    h+=`<h3>${clip(hub.label||('hub '+hub.id),24)}${isRelay(hub)?' · relay':''}</h3>`;
+    h+=`<div class="meta">${fmt(hub.tput)}/min on trains · ${hub.members.length} factories · `+
+       `${Math.ceil(hub.machines)} mach · @ (${(hub.x/100).toFixed(0)}, ${(hub.y/100).toFixed(0)}) m</div>`;
+    const sec=(title,obj,color)=>{ const e=Object.entries(obj||{}).sort((a,b)=>b[1]-a[1]); if(!e.length) return;
+      h+=`<div class="grp">${title}</div>`; e.forEach(([k,v])=> h+=rowKV(k, fmt(v), color)); };
+    // net in / net out / transit, derived from aggregated train cargo
+    const items=new Set([...Object.keys(hub._in),...Object.keys(hub._out)]);
+    const inN={}, outN={}, thru={};
+    items.forEach(it=>{ const i=hub._in[it]||0, o=hub._out[it]||0, t=Math.min(i,o);
+      if(t>0.5) thru[it]=t; if(i-o>0.5) inN[it]=i-o; if(o-i>0.5) outN[it]=o-i; });
+    sec('Cargo in / min (used by its factories)', inN, css('--good'));
+    sec('Cargo out / min (shipped onward)', outN, css('--warn'));
+    sec('Passing through / min (relay, not used)', thru, css('--dim'));
+    h+=`<div class="grp">Factories consolidated (${hub.members.length})</div>`;
+    hub.memberRegs.slice().sort((a,b)=>(b.machines||0)-(a.machines||0)).slice(0,12)
+      .forEach(rg=> h+=rowKV((isMine(rg)?'⛏ ':'')+rg.label_name,
+        Math.ceil(rg.machines)+' mach', regColor(rg)));
+    if(hub.members.length>12) h+=rowKV(`+${hub.members.length-12} more`,'','');
+    const lines=LOGI.links.filter(l=>l.a===hub.id||l.b===hub.id).sort((a,b)=>b.rate-a.rate);
+    if(lines.length){ h+=`<div class="grp">Train lines (${lines.length})</div>`;
+      lines.forEach(l=>{ const o=l.a===hub.id?l.b:l.a, dir=l.a===hub.id?'→':'←';
+        h+=rowKV(`${dir} ${clip(LOGI.hubs[o].label,16)}`, fmt(l.rate)+'/min',
+                 l.allFluid?css('--fluid'):'#9aa4b2'); }); }
+    d.innerHTML=h; d.classList.add('on');
+  }
+  window.__closeRegion=()=>{ selReg=null; selLogi=null; computeTrace();
+    document.getElementById('detail').classList.remove('on'); redraw(); };
+  cv.addEventListener('click',e=>{
+    if(!SP || (mapMode!=='factory' && mapMode!=='transport')) return;
+    if(downXY && Math.hypot(e.clientX-downXY.x,e.clientY-downXY.y)>5) return;  // was a drag
+    const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left,my=e.clientY-r.top;
+    if(mapMode==='transport'){
+      if(!LOGI) buildLogistics();
+      let hb=null,hd=1e9;
+      LOGI.hubs.forEach(h=>{ const p=pt(h), d=Math.hypot(p.x-mx,p.y-my);
+        if(d<=logiRad(h)+3 && d<hd){hd=d;hb=h;} });
+      if(hb){ selLogi=hb.id; logisticsDetail(hb); redraw(); }
+      else window.__closeRegion();
+      return;
+    }
+    let rb=null,rd=1e9;
+    SP.regions.forEach(rg=>{ const p=pt(rg), d=Math.hypot(p.x-mx,p.y-my);
+      if(d<=regRad(rg)+3 && d<rd){rd=d;rb=rg;} });
+    if(rb){ selReg=rb.id; computeTrace(); regionDetail(rb); redraw(); }
+    else { window.__closeRegion(); }
+  });
+
+  // ---- layer toggle (Factories / Mining / Transport) + density slider ---- //
+  // The Transport layer owns a logistics-density slider: it sets the grid cell
+  // that bins production regions into logistics hubs. Drag it to collapse more
+  // stations into fewer train depots (coarser) or keep basins separate (finer).
+  let logiCtl=null;
+  function updateLogiCount(){ if(!logiCtl||!LOGI) return;
+    logiCtl.querySelector('#logiCount').textContent =
+      `${LOGI.hubs.length} hubs · ${LOGI.links.length} lines · ${Math.round(logiCell/100)} m grid`; }
+  function setMapMode(m){ mapMode=m; selReg=null; selLogi=null; computeTrace(); hideTip();
+    document.getElementById('detail').classList.remove('on');
+    document.querySelectorAll('#mapModes button').forEach(b=>b.classList.toggle('on',b.dataset.mode===m));
+    if(m==='transport'){ if(!LOGI) buildLogistics(); updateLogiCount(); }
+    if(logiCtl) logiCtl.style.display = m==='transport'?'block':'none';
+    buildLegend(); redraw(); }
+  const modesEl=document.getElementById('mapModes');
+  if(SP){ modesEl.style.display='flex';
+    modesEl.innerHTML=`<button data-mode="factory">Factories</button>`+
+                      `<button data-mode="mining">Mining</button>`+
+                      `<button data-mode="transport">Transport</button>`;
+    modesEl.querySelectorAll('button').forEach(b=>
+      b.addEventListener('click',()=>setMapMode(b.dataset.mode)));
+    modesEl.querySelector('button[data-mode="factory"]').classList.add('on');
+    // build the density slider (transport layer only)
+    logiCtl=document.createElement('div'); logiCtl.className='float';
+    logiCtl.style.cssText='left:50%;transform:translateX(-50%);top:12px;'+
+      'padding:7px 13px;z-index:6;display:none';
+    logiCtl.innerHTML='<div style="display:flex;align-items:center;gap:10px;font-size:11.5px">'+
+      '<span style="color:var(--mut)">Logistics density</span>'+
+      `<input id="logiRange" type="range" min="50000" max="400000" step="10000" value="${logiCell}" style="width:170px">`+
+      '<span id="logiCount" style="color:var(--ink);font-variant-numeric:tabular-nums"></span></div>';
+    document.getElementById('mapView').appendChild(logiCtl);
+    logiCtl.querySelector('#logiRange').addEventListener('input',ev=>{
+      logiCell=+ev.target.value; selLogi=null; buildLogistics(); updateLogiCount();
+      document.getElementById('detail').classList.remove('on');
+      buildLegend(); redraw(); });
+  }
+  buildLegend();
+
+  window.__hub=(id)=>{ const rg=regById[id]; if(!rg) return;
+    switchView('map'); if(mapMode!=='factory') setMapMode('factory');
+    selReg=id; computeTrace(); regionDetail(rg); redraw(); };
+
+  window.__mapFit=()=>{ resize(); fit(); };
+  window.addEventListener('resize',()=>{ resize(); redraw(); });
+  window.__showOnMap=(cls)=>{ switchView('map');
+    if(SP && mapMode!=='mining') setMapMode('mining');
+    offRes.clear();
+    leg.querySelectorAll('.lg').forEach(el=>el.classList.remove('off'));
+    setHighlightRes(cls); };
+} else {
+  document.getElementById('tabMap').style.display='none';
+  window.__showOnMap=()=>{};
+}
+
+// ---------- view switching --------------------------------------------- //
+function switchView(v){
+  const fl=v==='flow';
+  document.getElementById('flowView').classList.toggle('on',fl);
+  document.getElementById('mapView').classList.toggle('on',!fl);
+  document.getElementById('tabFlow').classList.toggle('on',fl);
+  document.getElementById('tabMap').classList.toggle('on',!fl);
+  document.getElementById('flowLeg').style.display=fl?'flex':'none';
+  if(!fl && window.__mapFit) requestAnimationFrame(window.__mapFit);
+}
+document.getElementById('tabFlow').addEventListener('click',()=>switchView('flow'));
+document.getElementById('tabMap').addEventListener('click',()=>switchView('map'));
+if(location.hash==='#map' && DATA.map) switchView('map');
+</script>

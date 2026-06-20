@@ -28,6 +28,19 @@ PRODUCTION_MACHINES = {
 
 FLUID_CATEGORIES = {"liquid", "gas"}
 
+# Nuclear Power Plant (the only modelled generator). We synthesize one "burn"
+# recipe per fuel so the reactor is a first-class node in the recipe graph:
+# it consumes fuel rods, emits waste, and GENERATES power. This connects the
+# uranium -> waste -> plutonium -> ficsonium chain end to end, so the optimizer
+# can output plutonium/ficsonium and report the uranium extraction they need.
+GEN_POWER_MW = 2500.0
+NUCLEAR_PLANT = "Build_GeneratorNuclear_C"
+NUCLEAR_FUELS = {                              # fuel rod -> waste (None = clean)
+    "Desc_NuclearFuelRod_C": "Desc_NuclearWaste_C",
+    "Desc_PlutoniumFuelRod_C": "Desc_PlutoniumWaste_C",
+    "Desc_FicsoniumFuelRod_C": None,
+}
+
 # The map's raw extraction items.
 RAW_RESOURCES = {
     "Desc_OreIron_C", "Desc_OreCopper_C", "Desc_Stone_C", "Desc_Coal_C",
@@ -50,7 +63,8 @@ class Recipe:
     machine: str                     # short className of producing building
     inputs: dict[str, float]         # item className -> amount per craft
     outputs: dict[str, float]        # item className -> amount per craft
-    power: float                     # average MW for the machine on this recipe
+    power: float                     # average MW the machine DRAWS on this recipe
+    gen_mw: float = 0.0              # MW this recipe GENERATES (nuclear reactors)
 
     def rate(self, item: str) -> float:
         """Net items/min of `item` for ONE machine running this recipe."""
@@ -122,6 +136,27 @@ class GameData:
                 inputs=conv(v.get("ingredients", {})), outputs=outputs,
                 power=power_for(rk, machine),
             )
+
+        # Synthesize one reactor "burn" recipe per fuel (1 plant = 1 machine).
+        # Stored as per-minute amounts with time=60s, so rate() == amount/min.
+        self.machine_name[NUCLEAR_PLANT] = bld.get(NUCLEAR_PLANT, {}).get(
+            "name", "Nuclear Power Plant")
+        self.generator_fuel: dict[str, str] = {}     # recipe key -> fuel className
+        for fuel, waste in NUCLEAR_FUELS.items():
+            energy = float(items.get(fuel, {}).get("energy") or 0)
+            if energy <= 0:
+                continue
+            burn = GEN_POWER_MW / energy * 60.0       # rods/min per plant
+            outs = {}
+            if waste:
+                outs[waste] = burn * float(items.get(fuel, {}).get("waste") or 0)
+            key = f"Recipe_Burn_{fuel}"
+            recipes[key] = Recipe(
+                key=key, name=f"Burn {self.item_name.get(fuel, fuel)}",
+                alternate=False, time=60.0, machine=NUCLEAR_PLANT,
+                inputs={fuel: burn}, outputs=outs, power=0.0, gen_mw=GEN_POWER_MW,
+            )
+            self.generator_fuel[key] = fuel
         self.recipes = recipes
 
     @cached_property
@@ -149,3 +184,65 @@ class GameData:
 
     def recipes_for(self, item: str) -> list[Recipe]:
         return [r for r in self.recipes.values() if item in r.outputs]
+
+    @cached_property
+    def item_depth(self) -> dict[str, int]:
+        """Production depth ('tier') of each item: 0 for raw resources, else
+        1 + the max depth of a recipe's inputs, minimised over the recipes that
+        make it. Lets us label a factory by its most-processed ('top-level')
+        output instead of its highest-volume one. Cyclic chains (packaged
+        fluids, recycled plastic/rubber) are resolved by iterative relaxation."""
+        INF = float("inf")
+        depth: dict[str, float] = {it: 0.0 for it in self.raw_resources}
+        for r in self.recipes.values():
+            for it in list(r.inputs) + list(r.outputs):
+                depth.setdefault(it, INF)
+        for _ in range(64):
+            changed = False
+            for r in self.recipes.values():
+                in_d = max((depth[i] for i in r.inputs), default=0.0)
+                if in_d == INF:
+                    continue
+                cand = in_d + 1.0
+                for o in r.outputs:
+                    if cand < depth[o]:
+                        depth[o] = cand
+                        changed = True
+            if not changed:
+                break
+        return {it: (int(d) if d != INF else 0) for it, d in depth.items()}
+
+    def producible_items(self, extra_seed: set[str] | tuple = ()) -> set[str]:
+        """Closure of items reachable from raw resources (plus extra_seed) by
+        chaining whole recipes. extra_seed lets callers inject feedstocks that
+        aren't recipe outputs — e.g. nuclear waste, which only power plants emit,
+        and which unlocks the Plutonium/Ficsonium chain."""
+        prod: set[str] = set(self.raw_resources) | set(extra_seed)
+        changed = True
+        while changed:
+            changed = False
+            for r in self.recipes.values():
+                if all(i in prod for i in r.inputs):
+                    for o in r.outputs:
+                        if o not in prod:
+                            prod.add(o)
+                            changed = True
+        return prod
+
+    def terminal_products(self, *, producible_only: bool = True,
+                          extra_seed: set[str] | tuple = ()) -> list[str]:
+        """End-products: items some recipe outputs but no recipe consumes (and
+        not raw). The map's 'top-level' shippable goods — fuel rods, end-game
+        parts, ammo. Target the whole basket with the CLI token `all`.
+
+        producible_only drops items unreachable from raw (e.g. FICSMAS/event
+        goods) that would otherwise pin a ratio basket to zero output."""
+        consumed: set[str] = set()
+        produced: set[str] = set()
+        for r in self.recipes.values():
+            consumed |= set(r.inputs)
+            produced |= set(r.outputs)
+        term = produced - consumed - self.raw_resources
+        if producible_only:
+            term &= self.producible_items(extra_seed)
+        return sorted(term)
